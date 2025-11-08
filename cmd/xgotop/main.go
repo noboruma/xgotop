@@ -39,7 +39,8 @@ var (
 	storageFormat = flag.String("storage-format", "binary", "Storage format: binary, jsonl, or sqlite")
 	storageDir    = flag.String("storage-dir", "./sessions", "Directory for storing session data")
 
-	silent = flag.Bool("s", false, "Enable silent mode")
+	silent           = flag.Bool("s", false, "Enable silent mode")
+	metricFileSuffix = flag.String("mfs", "", "Suffix for metric file name")
 )
 
 const (
@@ -379,12 +380,8 @@ func main() {
 	}
 	b, err := json.MarshalIndent(metrics, "", "  ")
 	must(err, "marshaling metric data")
-	metricFileSuffix := ""
-	if *webMode {
-		metricFileSuffix = "_web"
-	}
 	err = os.WriteFile(
-		fmt.Sprintf("metrics_%s%s.json", time.Now().UTC().Format("2006-01-02-15-04-05"), metricFileSuffix),
+		fmt.Sprintf("metrics_%s%s.json", time.Now().UTC().Format("2006-01-02-15-04-05"), *metricFileSuffix),
 		b, 0666,
 	)
 	must(err, "writing metrics")

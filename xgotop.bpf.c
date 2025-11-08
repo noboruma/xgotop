@@ -116,7 +116,10 @@ int BPF_KPROBE(uprobe_makeslice,
         bpf_printk("Failed to read g, ret=%d", _ret);
         return 0;
     }
+
+#ifdef BPF_DEBUG
     bpf_printk("makeslice: goid=%llu, parentGoid=%llu", g.goid, g.parentGoid);
+#endif
 
     struct go_abi_type go_type;
     _ret = bpf_probe_read(&go_type, sizeof(go_type), typ);
@@ -149,7 +152,9 @@ int BPF_KPROBE(uprobe_makemap,
         bpf_printk("Failed to read g, ret=%d", _ret);
         return 0;
     }
+#ifdef BPF_DEBUG
     bpf_printk("makemap: goid=%llu, parentGoid=%llu", g.goid, g.parentGoid);
+#endif
 
     struct go_abi_map_type go_map;
     _ret = bpf_probe_read(&go_map, sizeof(go_map), typ);

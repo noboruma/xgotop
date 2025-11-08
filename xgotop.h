@@ -14,7 +14,7 @@
 
 #define __ARM__GO_G_ADDR(x) (__PT_REGS_CAST(x)->regs[28])
 
-#define BPF_DEBUG 0
+#define BPF_DEBUG 1
 
 #define G_ADDR_OFFSET -8
 #define G_GOID_OFFSET 152
@@ -125,6 +125,13 @@ const go_runtime_event_t *unused_go_runtime_event_t __attribute__((unused));
 // Maps
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
+    // TODO: If this is too small and the read workers put more messages in the Go chan
+    // than processors can handle, the ringbuffer is blocked and we start to get these
+    // error messages in trace_pipe:
+    // testserver-3455    [001] ...11   716.382798: bpf_trace_printk: Failed to reserve ringbuf
+    // We need to send another event to the Go prog with a new ringbuffer only for errors
+    // (and stats in the future) and the new ACC metric (accuracy) should use that ringbuffer's
+    // message count to calculate the accuracy as ACC = 100 * (total_events - errors) / total_events
 	__uint(max_entries, 1 << 24); // sizeof(go_runtime_event_t) = 64 = 2^6 => 2^(24 + 6) = 1 GB
 } events SEC(".maps");
 

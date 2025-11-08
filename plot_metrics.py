@@ -188,88 +188,152 @@ def create_rps_pps_comparison(metrics_data, labels, output_path, palette_name='v
 
 
 def create_metric_plots(metrics_data, labels, output_path, palette_name='vibrant'):
-    """Create neobrutalistic plots for all metrics"""
+    """Create neobrutalistic plots with RPS vs PPS for each dataset and other metrics"""
     global COLORS
     COLORS = PALETTES.get(palette_name, PALETTES['vibrant'])
     setup_neobrutalistic_style()
     
-    # Determine which metrics to plot (skip 'ts' as it's just timestamps)
-    metric_names = ['rps', 'pps', 'ewp', 'lat']
-    metric_titles = {
-        'rps': 'READS PER SECOND',
-        'pps': 'PROCESSED PER SECOND', 
-        'ewp': 'EVENTS WAITING TO BE PROCESSED',
-        'lat': 'LATENCY (ms)'
-    }
-    
-    # ASCII art decorations
-    ascii_patterns = ['///', '\\\\\\', '|||', '---', '+++', 'xxx']
-    
-    # Create figure with subplots
+    # Create figure with 2x2 grid
     fig = plt.figure(figsize=(20, 14))
     
     # Add a bold title with shadow effect
     fig.suptitle('PERFORMANCE METRICS ANALYSIS', 
                  fontsize=36, weight='black', y=0.98, color=COLORS['text'])
     
-    # Create 2x2 grid
-    for idx, metric in enumerate(metric_names):
+    # First two plots: RPS vs PPS for each dataset
+    for idx, (data, label) in enumerate(zip(metrics_data[:2], labels[:2])):
         ax = plt.subplot(2, 2, idx + 1)
         
-        # Plot each dataset
-        for i, (data, label) in enumerate(zip(metrics_data, labels)):
-            if metric in data:
-                # Use different colors for each dataset
-                color = list(COLORS.values())[i % len(COLORS)]
-                
-                # Create x-axis values (sample index)
-                x_values = np.arange(len(data[metric]))
-                
-                # Add shadow effect - plot same data offset
-                # Calculate dynamic offset based on data range
-                data_range = max(data[metric]) - min(data[metric])
-                y_offset = data_range * 0.01  # 1% of data range
-                x_offset = len(x_values) * 0.003  # 0.3% of x range
-                
-                # Use appropriate shadow color based on palette
-                shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
-                shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
-                
-                ax.plot(x_values + x_offset, np.array(data[metric]) - y_offset, 
-                       color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
-                
-                # Main plot line
-                ax.plot(x_values, data[metric], 
-                       color=color, linewidth=4, label=label, zorder=2)
+        if 'rps' in data and 'pps' in data:
+            # Create x-axis values
+            x_values = np.arange(len(data['rps']))
+            
+            # Get RPS and PPS data
+            rps_data = np.array(data['rps'])
+            pps_data = np.array(data['pps'])
+            
+            # Add shadows
+            shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
+            shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
+            x_offset = len(x_values) * 0.003
+            y_offset_rps = (max(rps_data) - min(rps_data)) * 0.01
+            y_offset_pps = (max(pps_data) - min(pps_data)) * 0.01
+            
+            # Plot shadows
+            ax.plot(x_values + x_offset, rps_data - y_offset_rps,
+                   color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
+            ax.plot(x_values + x_offset, pps_data - y_offset_pps,
+                   color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
+            
+            # Plot RPS and PPS
+            ax.plot(x_values, rps_data, 
+                   color=COLORS['primary'], linewidth=4, 
+                   label='RPS (Reads)', zorder=3)
+            ax.plot(x_values, pps_data, 
+                   color=COLORS['secondary'], linewidth=4, 
+                   label='PPS (Processed)', zorder=3)
+            
+            # Fill area between RPS and PPS
+            ax.fill_between(x_values, rps_data, pps_data, 
+                           alpha=0.3, color=COLORS['tertiary'], 
+                           label='Read-Process Gap', zorder=2)
+            
+            # Styling
+            ax.set_title(f'{label} - RPS vs PPS', 
+                        fontsize=18, weight='black', pad=20, color=COLORS['text'])
+            ax.set_xlabel('SAMPLE', fontsize=14, weight='bold', color=COLORS['text'])
+            ax.set_ylabel('OPERATIONS/SEC', fontsize=14, weight='bold', color=COLORS['text'])
+            ax.tick_params(colors=COLORS['text'], which='both')
+            
+            # Legend
+            legend = ax.legend(loc='upper right', frameon=True, 
+                             fancybox=False, shadow=False,
+                             edgecolor=COLORS['border'], 
+                             facecolor='white' if palette_name != 'cyberpunk' else COLORS['border'],
+                             prop={'weight': 'bold', 'size': 10})
+            legend.get_frame().set_linewidth(3)
+            
+            # Set legend text color
+            for text in legend.get_texts():
+                text.set_color('black' if palette_name != 'cyberpunk' else 'white')
+    
+    # Plot 3: Events Waiting to be Processed (EWP)
+    ax = plt.subplot(2, 2, 3)
+    for i, (data, label) in enumerate(zip(metrics_data, labels)):
+        if 'ewp' in data:
+            color = list(COLORS.values())[i % len(COLORS)]
+            x_values = np.arange(len(data['ewp']))
+            
+            # Shadow
+            shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
+            shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
+            x_offset = len(x_values) * 0.003
+            y_offset = max(1, (max(data['ewp']) - min(data['ewp'])) * 0.01)
+            
+            ax.plot(x_values + x_offset, np.array(data['ewp']) - y_offset,
+                   color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
+            
+            # Main plot
+            ax.plot(x_values, data['ewp'], 
+                   color=color, linewidth=4, label=label, zorder=2)
+    
+    ax.set_title('EVENTS WAITING TO BE PROCESSED', 
+                fontsize=18, weight='black', pad=20, color=COLORS['text'])
+    ax.set_xlabel('SAMPLE', fontsize=14, weight='bold', color=COLORS['text'])
+    ax.set_ylabel('COUNT', fontsize=14, weight='bold', color=COLORS['text'])
+    ax.tick_params(colors=COLORS['text'], which='both')
+    
+    # Legend
+    legend = ax.legend(loc='upper right', frameon=True, 
+                     fancybox=False, shadow=False,
+                     edgecolor=COLORS['border'], 
+                     facecolor='white' if palette_name != 'cyberpunk' else COLORS['border'],
+                     prop={'weight': 'bold', 'size': 10})
+    legend.get_frame().set_linewidth(3)
+    for text in legend.get_texts():
+        text.set_color('black' if palette_name != 'cyberpunk' else 'white')
+    
+    # Plot 4: Latency
+    ax = plt.subplot(2, 2, 4)
+    for i, (data, label) in enumerate(zip(metrics_data, labels)):
+        if 'lat' in data:
+            color = list(COLORS.values())[i % len(COLORS)]
+            x_values = np.arange(len(data['lat']))
+            
+            # Shadow
+            shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
+            shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
+            x_offset = len(x_values) * 0.003
+            y_offset = (max(data['lat']) - min(data['lat'])) * 0.01
+            
+            ax.plot(x_values + x_offset, np.array(data['lat']) - y_offset,
+                   color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
+            
+            # Main plot
+            ax.plot(x_values, data['lat'], 
+                   color=color, linewidth=4, label=label, zorder=2)
+    
+    ax.set_title('LATENCY (ms)', 
+                fontsize=18, weight='black', pad=20, color=COLORS['text'])
+    ax.set_xlabel('SAMPLE', fontsize=14, weight='bold', color=COLORS['text'])
+    ax.set_ylabel('MILLISECONDS', fontsize=14, weight='bold', color=COLORS['text'])
+    ax.tick_params(colors=COLORS['text'], which='both')
+    
+    # Legend
+    legend = ax.legend(loc='upper right', frameon=True, 
+                     fancybox=False, shadow=False,
+                     edgecolor=COLORS['border'], 
+                     facecolor='white' if palette_name != 'cyberpunk' else COLORS['border'],
+                     prop={'weight': 'bold', 'size': 10})
+    legend.get_frame().set_linewidth(3)
+    for text in legend.get_texts():
+        text.set_color('black' if palette_name != 'cyberpunk' else 'white')
+    
+    # Add decorative elements to all subplots
+    for idx in range(1, 5):
+        ax = plt.subplot(2, 2, idx)
         
-        # Styling
-        ax.set_title(metric_titles.get(metric, metric.upper()), 
-                    fontsize=18, weight='black', pad=20, color=COLORS['text'])
-        ax.set_xlabel('SAMPLE', fontsize=14, weight='bold', color=COLORS['text'])
-        ax.set_ylabel('VALUE', fontsize=14, weight='bold', color=COLORS['text'])
-        
-        # Set tick colors
-        ax.tick_params(colors=COLORS['text'], which='both')
-        
-        # Add background pattern (diagonal stripes)
-        for i in range(0, 100, 10):
-            ax.axhspan(ax.get_ylim()[0] + i * (ax.get_ylim()[1] - ax.get_ylim()[0]) / 100,
-                      ax.get_ylim()[0] + (i + 5) * (ax.get_ylim()[1] - ax.get_ylim()[0]) / 100,
-                      facecolor='white', alpha=0.1, zorder=0)
-        
-        # Bold legend with border
-        legend = ax.legend(loc='upper right', frameon=True, 
-                          fancybox=False, shadow=False,
-                          edgecolor=COLORS['border'], 
-                          facecolor='white' if palette_name != 'cyberpunk' else COLORS['border'],
-                          prop={'weight': 'bold', 'size': 10})
-        legend.get_frame().set_linewidth(3)
-        
-        # Set legend text color
-        for text in legend.get_texts():
-            text.set_color('black' if palette_name != 'cyberpunk' else 'white')
-        
-        # Add decorative elements - corner brackets
+        # Corner brackets
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()
         bracket_size = 0.05
@@ -289,6 +353,12 @@ def create_metric_plots(metrics_data, labels, output_path, palette_name='vibrant
         # Make spines thicker
         for spine in ax.spines.values():
             spine.set_linewidth(4)
+            
+        # Add background pattern (diagonal stripes)
+        for i in range(0, 100, 10):
+            ax.axhspan(ax.get_ylim()[0] + i * (ax.get_ylim()[1] - ax.get_ylim()[0]) / 100,
+                      ax.get_ylim()[0] + (i + 5) * (ax.get_ylim()[1] - ax.get_ylim()[0]) / 100,
+                      facecolor='white', alpha=0.1, zorder=0)
     
     # Adjust layout
     plt.tight_layout()
