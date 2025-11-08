@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -48,6 +49,8 @@ const (
 	symbolNewobject  = "runtime.newobject"
 	symbolNewproc1   = "runtime.newproc1"
 	symbolGoexit1    = "runtime.goexit1"
+
+	statsInterval = 1000 * time.Millisecond
 )
 
 var (
@@ -172,6 +175,8 @@ func main() {
 		log.Printf("Attaching uprobes to PID %d only", *pid)
 	}
 
+	probesAttachedAt := time.Now()
+
 	for symbol, probe := range probes {
 		uprobe, err := ex.Uprobe(symbol, probe, uprobeOpts)
 		must(err, "attaching uprobe at "+symbol)
@@ -183,8 +188,25 @@ func main() {
 	defer rd.Close()
 
 	eventCh := make(chan *ebpfGoRuntimeEventT, 1_000_000)
+
 	var eventCount atomic.Int64
+	var lastEventCount atomic.Int64
 	eventCount.Store(0)
+	lastEventCount.Store(0)
+
+	var readEventCount atomic.Uint64
+	var procEventCount atomic.Uint64
+	readEventCount.Store(0)
+	procEventCount.Store(0)
+
+	// [lock] {
+	// 	probeDurationNsSum u64
+	// 	probeDurationNsCount u64
+	// }
+	var probeDurationNsSum atomic.Int64
+	var probeDurationNsCount atomic.Int64
+	probeDurationNsSum.Store(0)
+	probeDurationNsCount.Store(0)
 
 	readersStopped := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -192,6 +214,13 @@ func main() {
 
 	readWg.Add(*readWorkers)
 	processWg.Add(*processWorkers)
+
+	// Metrics
+	metricRPS := make([]float64, 0, 1_000)
+	metricPPS := make([]float64, 0, 1_000)
+	metricEWP := make([]float64, 0, 1_000)
+	metricLAT := make([]float64, 0, 1_000)
+	metricTimestamps := make([]float64, 0, 1_000)
 
 	// Monitor for stop signals and close the ringbuffer reader to unblock all readers
 	go func() {
@@ -204,7 +233,7 @@ func main() {
 	}()
 
 	go func(stopped chan struct{}) {
-		t := time.NewTicker(500 * time.Millisecond)
+		t := time.NewTicker(statsInterval)
 		defer t.Stop()
 
 		for {
@@ -212,7 +241,51 @@ func main() {
 			case <-stopped:
 				return
 			case <-t.C:
-				log.Printf("[Stats] Event count: %d", eventCount.Load())
+				// Reader/processor stats
+				readEvs := readEventCount.Swap(0)
+				procEvs := procEventCount.Swap(0)
+				rps := float64(readEvs) * float64(time.Second) / float64(statsInterval)
+				pps := float64(procEvs) * float64(time.Second) / float64(statsInterval)
+				log.Printf("[Stats] RPS: %.2f ev/sec (%.2f ev/sec per worker)", rps, rps/float64(*readWorkers))
+				log.Printf("[Stats] PPS: %.2f ev/sec (%.2f ev/sec per worker)", pps, pps/float64(*processWorkers))
+
+				// Queue stats
+				ec := eventCount.Load()
+				lec := lastEventCount.Swap(ec)
+				ediff := ec - lec
+				sign := "+"
+				if ediff < 0 {
+					sign = ""
+				}
+				log.Printf("[Stats] EWP: %d (%s%d)", ec, sign, ediff)
+
+				// Latency stats
+				var lat float64
+				latCnt := probeDurationNsCount.Load()
+				if latCnt != 0 {
+					latSum := probeDurationNsSum.Load()
+					latAvg := latSum / latCnt
+					latPerc := float64(latSum) / float64(time.Since(probesAttachedAt).Nanoseconds()) * 100.0
+					lat = float64(latAvg)
+
+					var prog any
+					if *binaryPath == "" {
+						prog = *pid
+					} else {
+						prog = *binaryPath
+					}
+
+					log.Printf("[Stats] LAT: %d (%.2f%% of %v)\n\n", latAvg, latPerc, prog)
+				} else {
+					log.Printf("[Stats] LAT: NaN\n\n")
+					lat = 0
+				}
+
+				metricRPS = append(metricRPS, rps)
+				metricPPS = append(metricPPS, pps)
+				metricEWP = append(metricEWP, float64(ec))
+				metricLAT = append(metricLAT, lat)
+				metricTimestamps = append(metricTimestamps, float64(time.Now().UTC().UnixNano()))
 			}
 		}
 	}(readersStopped)
@@ -239,6 +312,7 @@ func main() {
 
 				eventCh <- event
 				eventCount.Add(1)
+				readEventCount.Add(1)
 			}
 		}(ctx, i, &readWg, rd)
 	}
@@ -257,6 +331,9 @@ func main() {
 					log.Printf("[PW-%d] Context is cancelled, ctx err: %v, draining events channel", i, ctx.Err())
 					for event := range eventCh {
 						eventCount.Add(-1)
+						procEventCount.Add(1)
+						probeDurationNsCount.Add(1)
+						probeDurationNsSum.Add(int64(event.ProbeDurationNs))
 						processEvent(i, event)
 					}
 					log.Printf("[PW-%d] Draining events channel complete", i)
@@ -267,6 +344,9 @@ func main() {
 						return
 					}
 					eventCount.Add(-1)
+					procEventCount.Add(1)
+					probeDurationNsCount.Add(1)
+					probeDurationNsSum.Add(int64(event.ProbeDurationNs))
 					processEvent(i, event)
 				}
 			}
@@ -283,6 +363,33 @@ func main() {
 
 	processWg.Wait()
 	log.Printf("All processors are done")
+
+	metrics := struct {
+		Rps []float64 `json:"rps"`
+		Pps []float64 `json:"pps"`
+		Ewp []float64 `json:"ewp"`
+		Lat []float64 `json:"lat"`
+		Ts  []float64 `json:"ts"`
+	}{
+		Rps: metricRPS,
+		Pps: metricPPS,
+		Ewp: metricEWP,
+		Lat: metricLAT,
+		Ts:  metricTimestamps,
+	}
+	log.Printf("[Metrics] %#v", metrics)
+	b, err := json.MarshalIndent(metrics, "", "  ")
+	must(err, "marshaling metric data")
+
+	metricFileSuffix := ""
+	if *webMode {
+		metricFileSuffix = "_web"
+	}
+	err = os.WriteFile(
+		fmt.Sprintf("metrics_%s%s.json", time.Now().UTC().Format("2006-01-02-15-04-05"), metricFileSuffix),
+		b, 0666,
+	)
+	must(err, "writing metrics")
 }
 
 func must(err error, op string) {
@@ -332,17 +439,17 @@ func processEvent(id int, event *ebpfGoRuntimeEventT) {
 	if !*webMode && !*silent {
 		switch event.EventType {
 		case 0:
-			log.Printf("[PW-%d] [%d] goroutine %d state %d -> %d", id, event.Timestamp, event.Attributes[2], event.Attributes[0], event.Attributes[1])
+			log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d state %d -> %d", id, event.Timestamp, event.ProbeDurationNs, event.Attributes[2], event.Attributes[0], event.Attributes[1])
 		case 1:
-			log.Printf("[PW-%d] [%d] goroutine %d allocated slice []%s with length %d and capacity %d", id, event.Timestamp, event.Goroutine, kindToString(Kind(event.Attributes[1])), event.Attributes[2], event.Attributes[3])
+			log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d allocated slice []%s with length %d and capacity %d", id, event.Timestamp, event.ProbeDurationNs, event.Goroutine, kindToString(Kind(event.Attributes[1])), event.Attributes[2], event.Attributes[3])
 		case 2:
-			log.Printf("[PW-%d] [%d] goroutine %d allocated map[%s]%s with initial capacity %d", id, event.Timestamp, event.Goroutine, kindToString(Kind(event.Attributes[1])), kindToString(Kind(event.Attributes[2])), event.Attributes[3])
+			log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d allocated map[%s]%s with initial capacity %d", id, event.Timestamp, event.ProbeDurationNs, event.Goroutine, kindToString(Kind(event.Attributes[1])), kindToString(Kind(event.Attributes[2])), event.Attributes[3])
 		case 3:
-			log.Printf("[PW-%d] [%d] goroutine %d allocated object of size %d and kind %s", id, event.Timestamp, event.Goroutine, event.Attributes[0], kindToString(Kind(event.Attributes[1])))
+			log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d allocated object of size %d and kind %s", id, event.Timestamp, event.ProbeDurationNs, event.Goroutine, event.Attributes[0], kindToString(Kind(event.Attributes[1])))
 		case 4:
-			log.Printf("[PW-%d] [%d] goroutine %d created new goroutine %d", id, event.Timestamp, event.Attributes[0], event.Attributes[1])
+			log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d created new goroutine %d", id, event.Timestamp, event.ProbeDurationNs, event.Attributes[0], event.Attributes[1])
 		case 5:
-			log.Printf("[PW-%d] [%d] goroutine %d exited", id, event.Timestamp, event.Attributes[0])
+			log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d exited", id, event.Timestamp, event.ProbeDurationNs, event.Attributes[0])
 		default:
 			log.Printf("[PW-%d] UNKNOWN EVENT TYPE: %d", id, event.EventType)
 		}

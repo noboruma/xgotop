@@ -1,4 +1,4 @@
-all: gen compile run
+all: gen compile run-silent
 .PHONY: all 
 
 vmlinux:
@@ -13,10 +13,10 @@ compile: gen
 	go build -o xgotop ./cmd/xgotop
 
 run:
-	sudo ./xgotop -b ./testserver -rw 3 -pw 5
-
-run1-1:
 	sudo ./xgotop -b ./testserver -rw 1 -pw 1
+
+run-silent:
+	sudo ./xgotop -b ./testserver -rw 1 -pw 1 -s
 
 # TODO: This date call is not working in the Makefile, fix it.
 # runlog:
@@ -36,7 +36,7 @@ xgotop-web:
 	go build -o xgotop ./cmd/xgotop
 
 run-web:
-	sudo ./xgotop -b ./testserver -rw 1 -pw 10 -web -web-port 8080 -storage-format binary -storage-dir ./sessions
+	sudo ./xgotop -b ./testserver -rw 1 -pw 1 -web -web-port 8080 -storage-format binary -storage-dir ./sessions
 
 clean:
 	- rm ebpf_arm64*.go

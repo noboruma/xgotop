@@ -69,7 +69,9 @@ typedef enum go_runtime_event_type {
 
 typedef struct go_runtime_event {
     u64 timestamp;
-    u64 event_type;
+    
+    u32 event_type;
+    u32 probe_duration_ns;
 
     u32 goroutine;
     u32 parent_goroutine;
@@ -140,23 +142,24 @@ struct {
     __type(value, u64); // Timestamp of exit (unused for now)
 } goroutines_in_exit SEC(".maps");
 
-#define SEND_EVENT(EVENT_TYPE, G_ID, G_PARENT_ID, ATTR0, ATTR1, ATTR2, ATTR3, ATTR4)             \
-        do {                                                                                     \
-            go_runtime_event_t *e = bpf_ringbuf_reserve(&events, sizeof(go_runtime_event_t), 0); \
-            if (!e) {                                                                            \
-                bpf_printk("Failed to reserve ringbuf");                                         \
-                return 0;                                                                        \
-            }                                                                                    \
-            e->timestamp = bpf_ktime_get_ns();                                                   \
-            e->event_type = (EVENT_TYPE);                                                        \
-            e->goroutine = (G_ID);                                                               \
-            e->parent_goroutine = (G_PARENT_ID);                                                 \
-            e->attributes[0] = (ATTR0);                                                          \
-            e->attributes[1] = (ATTR1);                                                          \
-            e->attributes[2] = (ATTR2);                                                          \
-            e->attributes[3] = (ATTR3);                                                          \
-            e->attributes[4] = (ATTR4);                                                          \
-            bpf_ringbuf_submit(e, 0);                                                            \
+#define SEND_EVENT(EVENT_TYPE, G_ID, G_PARENT_ID, ATTR0, ATTR1, ATTR2, ATTR3, ATTR4, START_NS_U64) \
+        do {                                                                                       \
+            go_runtime_event_t *e = bpf_ringbuf_reserve(&events, sizeof(go_runtime_event_t), 0);   \
+            if (!e) {                                                                              \
+                bpf_printk("Failed to reserve ringbuf");                                           \
+                return 0;                                                                          \
+            }                                                                                      \
+            e->timestamp = bpf_ktime_get_ns();                                                     \
+            e->event_type = (EVENT_TYPE);                                                          \
+            e->probe_duration_ns = (u32)(e->timestamp - (START_NS_U64));                           \
+            e->goroutine = (G_ID);                                                                 \
+            e->parent_goroutine = (G_PARENT_ID);                                                   \
+            e->attributes[0] = (ATTR0);                                                            \
+            e->attributes[1] = (ATTR1);                                                            \
+            e->attributes[2] = (ATTR2);                                                            \
+            e->attributes[3] = (ATTR3);                                                            \
+            e->attributes[4] = (ATTR4);                                                            \
+            bpf_ringbuf_submit(e, 0);                                                              \
         } while (0)
 
 __always_inline static int get_go_g_struct_arm(struct pt_regs *ctx, struct go_runtime_g *g) {
