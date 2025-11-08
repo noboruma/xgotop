@@ -377,10 +377,8 @@ func main() {
 		Lat: metricLAT,
 		Ts:  metricTimestamps,
 	}
-	log.Printf("[Metrics] %#v", metrics)
 	b, err := json.MarshalIndent(metrics, "", "  ")
 	must(err, "marshaling metric data")
-
 	metricFileSuffix := ""
 	if *webMode {
 		metricFileSuffix = "_web"
