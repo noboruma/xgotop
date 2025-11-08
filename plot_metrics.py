@@ -73,6 +73,120 @@ def setup_neobrutalistic_style():
         'axes.grid': False,
     })
 
+def create_rps_pps_comparison(metrics_data, labels, output_path, palette_name='vibrant'):
+    """Create RPS vs PPS comparison plots with area between them"""
+    global COLORS
+    COLORS = PALETTES.get(palette_name, PALETTES['vibrant'])
+    setup_neobrutalistic_style()
+    
+    # Create figure with subplots (one per dataset)
+    n_datasets = len(metrics_data)
+    fig = plt.figure(figsize=(12, 6 * n_datasets))
+    
+    # Add a bold title with shadow effect
+    fig.suptitle('RPS vs PPS COMPARISON', 
+                 fontsize=36, weight='black', y=0.98, color=COLORS['text'])
+    
+    # Create subplot for each dataset
+    for idx, (data, label) in enumerate(zip(metrics_data, labels)):
+        ax = plt.subplot(n_datasets, 1, idx + 1)
+        
+        if 'rps' in data and 'pps' in data:
+            # Create x-axis values
+            x_values = np.arange(len(data['rps']))
+            
+            # Get RPS and PPS data
+            rps_data = np.array(data['rps'])
+            pps_data = np.array(data['pps'])
+            
+            # Add shadows
+            shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
+            shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
+            x_offset = len(x_values) * 0.003
+            y_offset_rps = (max(rps_data) - min(rps_data)) * 0.01
+            y_offset_pps = (max(pps_data) - min(pps_data)) * 0.01
+            
+            # Plot shadows
+            ax.plot(x_values + x_offset, rps_data - y_offset_rps,
+                   color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
+            ax.plot(x_values + x_offset, pps_data - y_offset_pps,
+                   color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
+            
+            # Plot RPS and PPS
+            rps_line = ax.plot(x_values, rps_data, 
+                              color=COLORS['primary'], linewidth=4, 
+                              label='RPS (Reads)', zorder=3)
+            pps_line = ax.plot(x_values, pps_data, 
+                              color=COLORS['secondary'], linewidth=4, 
+                              label='PPS (Processed)', zorder=3)
+            
+            # Fill area between RPS and PPS
+            ax.fill_between(x_values, rps_data, pps_data, 
+                           alpha=0.3, color=COLORS['tertiary'], 
+                           label='Read-Process Gap', zorder=2)
+            
+            # Styling
+            ax.set_title(f'{label} - RPS vs PPS', 
+                        fontsize=20, weight='black', pad=20, color=COLORS['text'])
+            ax.set_xlabel('SAMPLE', fontsize=14, weight='bold', color=COLORS['text'])
+            ax.set_ylabel('OPERATIONS/SEC', fontsize=14, weight='bold', color=COLORS['text'])
+            ax.tick_params(colors=COLORS['text'], which='both')
+            
+            # Add grid for better readability
+            ax.grid(True, alpha=0.3, color=COLORS['text'], linewidth=1, linestyle='--')
+            
+            # Legend
+            legend = ax.legend(loc='upper right', frameon=True, 
+                             fancybox=False, shadow=False,
+                             edgecolor=COLORS['border'], 
+                             facecolor='white' if palette_name != 'cyberpunk' else COLORS['border'],
+                             prop={'weight': 'bold', 'size': 12})
+            legend.get_frame().set_linewidth(3)
+            
+            # Set legend text color
+            for text in legend.get_texts():
+                text.set_color('black' if palette_name != 'cyberpunk' else 'white')
+            
+            # Add decorative corner brackets
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            bracket_size = 0.03
+            
+            # Top-left corner bracket
+            ax.plot([xlim[0], xlim[0] + (xlim[1]-xlim[0])*bracket_size], 
+                   [ylim[1], ylim[1]], color=COLORS['border'], linewidth=6)
+            ax.plot([xlim[0], xlim[0]], 
+                   [ylim[1], ylim[1] - (ylim[1]-ylim[0])*bracket_size], 
+                   color=COLORS['border'], linewidth=6)
+            
+            # Bottom-right corner bracket
+            ax.plot([xlim[1] - (xlim[1]-xlim[0])*bracket_size, xlim[1]], 
+                   [ylim[0], ylim[0]], color=COLORS['border'], linewidth=6)
+            ax.plot([xlim[1], xlim[1]], 
+                   [ylim[0], ylim[0] + (ylim[1]-ylim[0])*bracket_size], 
+                   color=COLORS['border'], linewidth=6)
+            
+            # Make spines thicker
+            for spine in ax.spines.values():
+                spine.set_linewidth(4)
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Add decorative border around entire figure
+    border_ax = fig.add_subplot(111, frameon=False)
+    border_ax.tick_params(labelcolor='none', top=False, bottom=False, 
+                         left=False, right=False)
+    for spine in border_ax.spines.values():
+        spine.set_linewidth(8)
+        spine.set_edgecolor(COLORS['border'])
+    
+    # Save figure
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', 
+                facecolor=COLORS['background'], edgecolor=COLORS['border'])
+    print(f"Plot saved to: {output_path}")
+
+
 def create_metric_plots(metrics_data, labels, output_path, palette_name='vibrant'):
     """Create neobrutalistic plots for all metrics"""
     global COLORS
@@ -202,6 +316,9 @@ def main():
     parser.add_argument('--palette', '-p', default='vibrant',
                        choices=['vibrant', 'cyberpunk', 'brutalist'],
                        help='Color palette to use (default: vibrant)')
+    parser.add_argument('--mode', '-m', default='all',
+                       choices=['all', 'rps-pps'],
+                       help='Plot mode: all metrics or RPS vs PPS comparison (default: all)')
     
     args = parser.parse_args()
     
@@ -229,8 +346,11 @@ def main():
             print(f"Error loading {path}: {e}")
             sys.exit(1)
     
-    # Create plots
-    create_metric_plots(metrics_data, labels, args.output, args.palette)
+    # Create plots based on mode
+    if args.mode == 'rps-pps':
+        create_rps_pps_comparison(metrics_data, labels, args.output, args.palette)
+    else:
+        create_metric_plots(metrics_data, labels, args.output, args.palette)
 
 if __name__ == "__main__":
     main()

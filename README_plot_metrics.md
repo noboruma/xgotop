@@ -50,12 +50,45 @@ python plot_metrics.py --files "Regular:metrics.json" "Web:metrics_web.json" --p
 python plot_metrics.py --files "Regular:metrics.json" "Web:metrics_web.json" --palette brutalist
 ```
 
+### Plot Modes
+
+The script supports two visualization modes:
+
+**All Metrics (default)**
+- Creates a 2x2 grid showing all metrics (RPS, PPS, EWP, LAT)
+- Each metric is plotted separately across all files
+
+```bash
+python plot_metrics.py --files "Regular:metrics.json" "Web:metrics_web.json" --mode all
+```
+
+**RPS vs PPS Comparison**
+- Creates one subplot per JSON file
+- Shows RPS and PPS on the same plot with area fill between them
+- Makes it easy to visualize the gap between reads and processing
+
+```bash
+python plot_metrics.py --files "Regular:metrics.json" "Web:metrics_web.json" --mode rps-pps
+```
+
 ### Examples
 
-Compare regular vs web performance:
+Compare regular vs web performance (all metrics):
 
 ```bash
 python plot_metrics.py --files "Regular:metrics_2025-11-08-15-06-22.json" "Web:metrics_2025-11-08-15-09-19_web.json" --output metrics_comparison.png
+```
+
+RPS vs PPS comparison with area plot:
+
+```bash
+python plot_metrics.py --files "Regular:metrics_2025-11-08-15-06-22.json" "Web:metrics_2025-11-08-15-09-19_web.json" --mode rps-pps --output rps_pps_gap.png
+```
+
+RPS vs PPS with cyberpunk theme:
+
+```bash
+python plot_metrics.py --files "Regular:metrics_2025-11-08-15-06-22.json" "Web:metrics_2025-11-08-15-09-19_web.json" --mode rps-pps --palette cyberpunk
 ```
 
 Compare multiple runs:
