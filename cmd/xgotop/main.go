@@ -380,6 +380,9 @@ func main() {
 	}
 	b, err := json.MarshalIndent(metrics, "", "  ")
 	must(err, "marshaling metric data")
+	if *metricFileSuffix == "" {
+		*metricFileSuffix = "_" + *metricFileSuffix
+	}
 	err = os.WriteFile(
 		fmt.Sprintf("metrics_%s%s.json", time.Now().UTC().Format("2006-01-02-15-04-05"), *metricFileSuffix),
 		b, 0666,

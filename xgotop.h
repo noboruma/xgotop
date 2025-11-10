@@ -14,7 +14,7 @@
 
 #define __ARM__GO_G_ADDR(x) (__PT_REGS_CAST(x)->regs[28])
 
-#define BPF_DEBUG 1
+// #define BPF_DEBUG 1
 
 #define G_ADDR_OFFSET -8
 #define G_GOID_OFFSET 152

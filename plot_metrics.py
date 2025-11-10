@@ -81,7 +81,13 @@ def create_rps_pps_comparison(metrics_data, labels, output_path, palette_name='v
     
     # Create figure with subplots (one per dataset)
     n_datasets = len(metrics_data)
-    fig = plt.figure(figsize=(12, 6 * n_datasets))
+    # Special handling for single dataset - use 2x1 layout
+    if n_datasets == 1:
+        fig = plt.figure(figsize=(12, 12))
+        n_rows = 2
+    else:
+        fig = plt.figure(figsize=(12, 6 * n_datasets))
+        n_rows = n_datasets
     
     # Add a bold title with shadow effect
     fig.suptitle('RPS vs PPS COMPARISON', 
@@ -89,7 +95,7 @@ def create_rps_pps_comparison(metrics_data, labels, output_path, palette_name='v
     
     # Create subplot for each dataset
     for idx, (data, label) in enumerate(zip(metrics_data, labels)):
-        ax = plt.subplot(n_datasets, 1, idx + 1)
+        ax = plt.subplot(n_rows, 1, idx + 1)
         
         if 'rps' in data and 'pps' in data:
             # Create x-axis values
@@ -170,6 +176,91 @@ def create_rps_pps_comparison(metrics_data, labels, output_path, palette_name='v
             for spine in ax.spines.values():
                 spine.set_linewidth(4)
     
+    # If single dataset, add summary statistics in second subplot
+    if n_datasets == 1 and len(metrics_data) > 0:
+        ax2 = plt.subplot(2, 1, 2)
+        data = metrics_data[0]
+        
+        if 'rps' in data and 'pps' in data:
+            rps_data = np.array(data['rps'])
+            pps_data = np.array(data['pps'])
+            
+            # Calculate statistics
+            avg_rps = np.mean(rps_data)
+            avg_pps = np.mean(pps_data)
+            max_rps = np.max(rps_data)
+            max_pps = np.max(pps_data)
+            min_rps = np.min(rps_data)
+            min_pps = np.min(pps_data)
+            avg_gap = np.mean(rps_data - pps_data)
+            
+            # Clear axis
+            ax2.clear()
+            ax2.set_xlim(0, 10)
+            ax2.set_ylim(0, 10)
+            ax2.axis('off')
+            
+            # Create neobrutalistic info boxes
+            box_width = 4
+            box_height = 1.5
+            
+            # Title box
+            title_rect = patches.Rectangle((1, 8), 8, 1.5, 
+                                         facecolor=COLORS['primary'], 
+                                         edgecolor=COLORS['border'],
+                                         linewidth=4)
+            ax2.add_patch(title_rect)
+            ax2.text(5, 8.75, 'PERFORMANCE SUMMARY', 
+                    ha='center', va='center', fontsize=20, 
+                    weight='black', color='white')
+            
+            # RPS Stats box
+            rps_rect = patches.Rectangle((0.5, 5.5), box_width, box_height,
+                                       facecolor=COLORS['secondary'],
+                                       edgecolor=COLORS['border'],
+                                       linewidth=3)
+            ax2.add_patch(rps_rect)
+            ax2.text(2.5, 6.8, 'RPS STATS', ha='center', va='center',
+                    fontsize=14, weight='black', color='white')
+            ax2.text(2.5, 6.2, f'AVG: {avg_rps:.2f}', ha='center', va='center',
+                    fontsize=12, weight='bold', color='white')
+            ax2.text(2.5, 5.8, f'MIN: {min_rps:.2f} | MAX: {max_rps:.2f}', 
+                    ha='center', va='center', fontsize=10, weight='bold', color='white')
+            
+            # PPS Stats box
+            pps_rect = patches.Rectangle((5.5, 5.5), box_width, box_height,
+                                       facecolor=COLORS['tertiary'],
+                                       edgecolor=COLORS['border'],
+                                       linewidth=3)
+            ax2.add_patch(pps_rect)
+            ax2.text(7.5, 6.8, 'PPS STATS', ha='center', va='center',
+                    fontsize=14, weight='black', color=COLORS['border'])
+            ax2.text(7.5, 6.2, f'AVG: {avg_pps:.2f}', ha='center', va='center',
+                    fontsize=12, weight='bold', color=COLORS['border'])
+            ax2.text(7.5, 5.8, f'MIN: {min_pps:.2f} | MAX: {max_pps:.2f}', 
+                    ha='center', va='center', fontsize=10, weight='bold', color=COLORS['border'])
+            
+            # Gap Analysis box
+            gap_rect = patches.Rectangle((2, 3), 6, box_height,
+                                       facecolor=COLORS['quaternary'],
+                                       edgecolor=COLORS['border'],
+                                       linewidth=3)
+            ax2.add_patch(gap_rect)
+            ax2.text(5, 4.3, 'READ-PROCESS GAP', ha='center', va='center',
+                    fontsize=14, weight='black', color=COLORS['border'])
+            ax2.text(5, 3.5, f'AVERAGE GAP: {avg_gap:.2f} ops/sec', 
+                    ha='center', va='center', fontsize=12, weight='bold', color=COLORS['border'])
+            
+            # Add decorative elements
+            # Shadow effects
+            shadow_offset = 0.1
+            for rect in [title_rect, rps_rect, pps_rect, gap_rect]:
+                shadow = patches.Rectangle((rect.get_x() + shadow_offset, 
+                                          rect.get_y() - shadow_offset),
+                                         rect.get_width(), rect.get_height(),
+                                         facecolor='black', alpha=0.3, zorder=0)
+                ax2.add_patch(shadow)
+    
     # Adjust layout
     plt.tight_layout()
     
@@ -200,9 +291,12 @@ def create_metric_plots(metrics_data, labels, output_path, palette_name='vibrant
     fig.suptitle('PERFORMANCE METRICS ANALYSIS', 
                  fontsize=36, weight='black', y=0.98, color=COLORS['text'])
     
-    # First two plots: RPS vs PPS for each dataset
-    for idx, (data, label) in enumerate(zip(metrics_data[:2], labels[:2])):
-        ax = plt.subplot(2, 2, idx + 1)
+    # Special handling for single dataset
+    if len(metrics_data) == 1:
+        # Single dataset: RPS vs PPS spans two columns
+        data = metrics_data[0]
+        label = labels[0]
+        ax = plt.subplot(2, 2, (1, 2))  # Span columns 1 and 2
         
         if 'rps' in data and 'pps' in data:
             # Create x-axis values
@@ -245,6 +339,9 @@ def create_metric_plots(metrics_data, labels, output_path, palette_name='vibrant
             ax.set_ylabel('OPERATIONS/SEC', fontsize=14, weight='bold', color=COLORS['text'])
             ax.tick_params(colors=COLORS['text'], which='both')
             
+            # Double the x-axis ticks since plot spans two columns
+            ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True, nbins=20))
+            
             # Legend
             legend = ax.legend(loc='upper right', frameon=True, 
                              fancybox=False, shadow=False,
@@ -256,6 +353,63 @@ def create_metric_plots(metrics_data, labels, output_path, palette_name='vibrant
             # Set legend text color
             for text in legend.get_texts():
                 text.set_color('black' if palette_name != 'cyberpunk' else 'white')
+    else:
+        # Multiple datasets: First two plots are RPS vs PPS for each dataset
+        for idx, (data, label) in enumerate(zip(metrics_data[:2], labels[:2])):
+            ax = plt.subplot(2, 2, idx + 1)
+            
+            if 'rps' in data and 'pps' in data:
+                # Create x-axis values
+                x_values = np.arange(len(data['rps']))
+                
+                # Get RPS and PPS data
+                rps_data = np.array(data['rps'])
+                pps_data = np.array(data['pps'])
+                
+                # Add shadows
+                shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
+                shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
+                x_offset = len(x_values) * 0.003
+                y_offset_rps = (max(rps_data) - min(rps_data)) * 0.01
+                y_offset_pps = (max(pps_data) - min(pps_data)) * 0.01
+                
+                # Plot shadows
+                ax.plot(x_values + x_offset, rps_data - y_offset_rps,
+                       color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
+                ax.plot(x_values + x_offset, pps_data - y_offset_pps,
+                       color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
+                
+                # Plot RPS and PPS
+                ax.plot(x_values, rps_data, 
+                       color=COLORS['primary'], linewidth=4, 
+                       label='RPS (Reads)', zorder=3)
+                ax.plot(x_values, pps_data, 
+                       color=COLORS['secondary'], linewidth=4, 
+                       label='PPS (Processed)', zorder=3)
+                
+                # Fill area between RPS and PPS
+                ax.fill_between(x_values, rps_data, pps_data, 
+                               alpha=0.3, color=COLORS['tertiary'], 
+                               label='Read-Process Gap', zorder=2)
+                
+                # Styling
+                ax.set_title(f'{label} - RPS vs PPS', 
+                            fontsize=18, weight='black', pad=20, color=COLORS['text'])
+                ax.set_xlabel('SAMPLE', fontsize=14, weight='bold', color=COLORS['text'])
+                ax.set_ylabel('OPERATIONS/SEC', fontsize=14, weight='bold', color=COLORS['text'])
+                ax.tick_params(colors=COLORS['text'], which='both')
+                
+                # Legend
+                legend = ax.legend(loc='upper right', frameon=True, 
+                                 fancybox=False, shadow=False,
+                                 edgecolor=COLORS['border'], 
+                                 facecolor='white' if palette_name != 'cyberpunk' else COLORS['border'],
+                                 prop={'weight': 'bold', 'size': 10})
+                legend.get_frame().set_linewidth(3)
+                
+                # Set legend text color
+                for text in legend.get_texts():
+                    text.set_color('black' if palette_name != 'cyberpunk' else 'white')
     
     # Plot 3: Events Waiting to be Processed (EWP)
     ax = plt.subplot(2, 2, 3)
@@ -330,35 +484,72 @@ def create_metric_plots(metrics_data, labels, output_path, palette_name='vibrant
         text.set_color('black' if palette_name != 'cyberpunk' else 'white')
     
     # Add decorative elements to all subplots
-    for idx in range(1, 5):
-        ax = plt.subplot(2, 2, idx)
-        
-        # Corner brackets
-        xlim = ax.get_xlim()
-        ylim = ax.get_ylim()
-        bracket_size = 0.05
-        
-        # Top-left corner bracket
-        ax.plot([xlim[0], xlim[0] + (xlim[1]-xlim[0])*bracket_size], 
-               [ylim[1], ylim[1]], color=COLORS['border'], linewidth=6)
-        ax.plot([xlim[0], xlim[0]], 
-               [ylim[1], ylim[1] - (ylim[1]-ylim[0])*bracket_size], color=COLORS['border'], linewidth=6)
-        
-        # Bottom-right corner bracket
-        ax.plot([xlim[1] - (xlim[1]-xlim[0])*bracket_size, xlim[1]], 
-               [ylim[0], ylim[0]], color=COLORS['border'], linewidth=6)
-        ax.plot([xlim[1], xlim[1]], 
-               [ylim[0], ylim[0] + (ylim[1]-ylim[0])*bracket_size], color=COLORS['border'], linewidth=6)
-        
-        # Make spines thicker
-        for spine in ax.spines.values():
-            spine.set_linewidth(4)
+    if len(metrics_data) == 1:
+        # For single dataset: RPS/PPS spans (1,2), EWP is 3, Latency is 4
+        subplot_positions = [(1, 2), 3, 4]
+        for pos in subplot_positions:
+            if isinstance(pos, tuple):
+                ax = plt.subplot(2, 2, pos)
+            else:
+                ax = plt.subplot(2, 2, pos)
             
-        # Add background pattern (diagonal stripes)
-        for i in range(0, 100, 10):
-            ax.axhspan(ax.get_ylim()[0] + i * (ax.get_ylim()[1] - ax.get_ylim()[0]) / 100,
-                      ax.get_ylim()[0] + (i + 5) * (ax.get_ylim()[1] - ax.get_ylim()[0]) / 100,
-                      facecolor='white', alpha=0.1, zorder=0)
+            # Corner brackets
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            bracket_size = 0.05
+            
+            # Top-left corner bracket
+            ax.plot([xlim[0], xlim[0] + (xlim[1]-xlim[0])*bracket_size], 
+                   [ylim[1], ylim[1]], color=COLORS['border'], linewidth=6)
+            ax.plot([xlim[0], xlim[0]], 
+                   [ylim[1], ylim[1] - (ylim[1]-ylim[0])*bracket_size], color=COLORS['border'], linewidth=6)
+            
+            # Bottom-right corner bracket
+            ax.plot([xlim[1] - (xlim[1]-xlim[0])*bracket_size, xlim[1]], 
+                   [ylim[0], ylim[0]], color=COLORS['border'], linewidth=6)
+            ax.plot([xlim[1], xlim[1]], 
+                   [ylim[0], ylim[0] + (ylim[1]-ylim[0])*bracket_size], color=COLORS['border'], linewidth=6)
+            
+            # Make spines thicker
+            for spine in ax.spines.values():
+                spine.set_linewidth(4)
+                
+            # Add background pattern (diagonal stripes)
+            for i in range(0, 100, 10):
+                ax.axhspan(ax.get_ylim()[0] + i * (ax.get_ylim()[1] - ax.get_ylim()[0]) / 100,
+                          ax.get_ylim()[0] + (i + 5) * (ax.get_ylim()[1] - ax.get_ylim()[0]) / 100,
+                          facecolor='white', alpha=0.1, zorder=0)
+    else:
+        # For multiple datasets: regular 2x2 grid
+        for idx in range(1, 5):
+            ax = plt.subplot(2, 2, idx)
+        
+            # Corner brackets
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            bracket_size = 0.05
+            
+            # Top-left corner bracket
+            ax.plot([xlim[0], xlim[0] + (xlim[1]-xlim[0])*bracket_size], 
+                   [ylim[1], ylim[1]], color=COLORS['border'], linewidth=6)
+            ax.plot([xlim[0], xlim[0]], 
+                   [ylim[1], ylim[1] - (ylim[1]-ylim[0])*bracket_size], color=COLORS['border'], linewidth=6)
+            
+            # Bottom-right corner bracket
+            ax.plot([xlim[1] - (xlim[1]-xlim[0])*bracket_size, xlim[1]], 
+                   [ylim[0], ylim[0]], color=COLORS['border'], linewidth=6)
+            ax.plot([xlim[1], xlim[1]], 
+                   [ylim[0], ylim[0] + (ylim[1]-ylim[0])*bracket_size], color=COLORS['border'], linewidth=6)
+            
+            # Make spines thicker
+            for spine in ax.spines.values():
+                spine.set_linewidth(4)
+                
+            # Add background pattern (diagonal stripes)
+            for i in range(0, 100, 10):
+                ax.axhspan(ax.get_ylim()[0] + i * (ax.get_ylim()[1] - ax.get_ylim()[0]) / 100,
+                          ax.get_ylim()[0] + (i + 5) * (ax.get_ylim()[1] - ax.get_ylim()[0]) / 100,
+                          facecolor='white', alpha=0.1, zorder=0)
     
     # Adjust layout
     plt.tight_layout()
