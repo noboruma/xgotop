@@ -49,6 +49,12 @@ PALETTES = {
 # Default colors
 COLORS = PALETTES['vibrant']
 
+LINESTYLES = [
+    dot + line 
+    for dot in ('.', 'o', '^', 'v', '+', 'x')
+    for line in ('-', '--', '-.', ':')
+]
+
 def load_metrics(json_path):
     """Load metrics from JSON file"""
     with open(json_path, 'r') as f:
@@ -416,6 +422,7 @@ def create_metric_plots(metrics_data, labels, output_path, palette_name='vibrant
     for i, (data, label) in enumerate(zip(metrics_data, labels)):
         if 'ewp' in data:
             color = list(COLORS.values())[i % len(COLORS)]
+            linestyle = LINESTYLES[i % len(LINESTYLES)]
             x_values = np.arange(len(data['ewp']))
             
             # Shadow
@@ -424,11 +431,11 @@ def create_metric_plots(metrics_data, labels, output_path, palette_name='vibrant
             x_offset = len(x_values) * 0.003
             y_offset = max(1, (max(data['ewp']) - min(data['ewp'])) * 0.01)
             
-            ax.plot(x_values + x_offset, np.array(data['ewp']) - y_offset,
+            ax.plot(x_values + x_offset, np.array(data['ewp']) - y_offset, linestyle,
                    color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
             
             # Main plot
-            ax.plot(x_values, data['ewp'], 
+            ax.plot(x_values, data['ewp'], linestyle,
                    color=color, linewidth=4, label=label, zorder=2)
     
     ax.set_title('EVENTS WAITING TO BE PROCESSED', 
@@ -452,6 +459,7 @@ def create_metric_plots(metrics_data, labels, output_path, palette_name='vibrant
     for i, (data, label) in enumerate(zip(metrics_data, labels)):
         if 'lat' in data:
             color = list(COLORS.values())[i % len(COLORS)]
+            linestyle = LINESTYLES[i % len(LINESTYLES)]
             x_values = np.arange(len(data['lat']))
             
             # Shadow
@@ -460,11 +468,11 @@ def create_metric_plots(metrics_data, labels, output_path, palette_name='vibrant
             x_offset = len(x_values) * 0.003
             y_offset = (max(data['lat']) - min(data['lat'])) * 0.01
             
-            ax.plot(x_values + x_offset, np.array(data['lat']) - y_offset,
+            ax.plot(x_values + x_offset, np.array(data['lat']) - y_offset, linestyle,
                    color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
             
             # Main plot
-            ax.plot(x_values, data['lat'], 
+            ax.plot(x_values, data['lat'], linestyle,
                    color=color, linewidth=4, label=label, zorder=2)
     
     ax.set_title('LATENCY (ms)', 

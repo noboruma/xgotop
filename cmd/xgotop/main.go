@@ -380,7 +380,7 @@ func main() {
 	}
 	b, err := json.MarshalIndent(metrics, "", "  ")
 	must(err, "marshaling metric data")
-	if *metricFileSuffix == "" {
+	if *metricFileSuffix != "" {
 		*metricFileSuffix = "_" + *metricFileSuffix
 	}
 	err = os.WriteFile(
