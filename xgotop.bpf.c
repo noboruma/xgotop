@@ -6,6 +6,7 @@ int BPF_KPROBE(uprobe_casgstatus,
                const void *gp,
                const u32 oldval,
                const u32 newval) {
+    CHECK_SAMPLING(GO_RUNTIME_EVENT_TYPE_CAS_G_STATUS);
     u64 probe_start_ns = bpf_ktime_get_ns();
     u64 _ret, gp_id, g_id, g_parent_id;
     struct go_runtime_g g;
@@ -73,6 +74,7 @@ int BPF_KPROBE(uprobe_casgstatus,
 SEC("uprobe/runtime.newobject")
 int BPF_KPROBE(uprobe_newobject,
                const void *typ) {
+    CHECK_SAMPLING(GO_RUNTIME_EVENT_TYPE_NEW_OBJECT);
     u64 probe_start_ns = bpf_ktime_get_ns();
     u64 _ret;
     struct go_runtime_g g;
@@ -107,6 +109,7 @@ int BPF_KPROBE(uprobe_makeslice,
                const void *typ,
                const u64 len,
                const u64 cap) {
+    CHECK_SAMPLING(GO_RUNTIME_EVENT_TYPE_MAKE_SLICE);
     u64 probe_start_ns = bpf_ktime_get_ns();
     u64 _ret;
 
@@ -143,6 +146,7 @@ int BPF_KPROBE(uprobe_makemap,
                const void *typ,
                const u64 hint,
                const void *m) {
+    CHECK_SAMPLING(GO_RUNTIME_EVENT_TYPE_MAKE_MAP);
     u64 probe_start_ns = bpf_ktime_get_ns();
     u64 _ret;
 
@@ -190,6 +194,7 @@ SEC("uprobe/runtime.newproc1")
 int BPF_KPROBE(uprobe_newproc1,
                const void *__skip_fn,
                const void *callergp) {
+    CHECK_SAMPLING(GO_RUNTIME_EVENT_TYPE_NEWGOROUTINE);
     u64 _ret, goid, callergoid;
     struct go_runtime_g g;
 
@@ -226,6 +231,7 @@ int BPF_KPROBE(uprobe_newproc1,
 // func goexit1()
 SEC("uprobe/runtime.goexit1")
 int BPF_KPROBE(uprobe_goexit1) {
+    CHECK_SAMPLING(GO_RUNTIME_EVENT_TYPE_GOEXIT);
     u64 _ret;
 
     struct go_runtime_g g;

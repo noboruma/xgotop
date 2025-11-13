@@ -11,6 +11,10 @@ compile: gen
 	go build -o testserver ./cmd/testserver
 	go build -o goroutinepadding ./cmd/goroutinepadding
 	go build -o xgotop ./cmd/xgotop
+	go build -o samplingtest ./cmd/samplingtest
+
+samplingtest: gen compile
+	./scripts/test_sampling.sh
 
 run:
 	sudo ./xgotop -b ./testserver -rw 1 -pw 1

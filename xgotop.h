@@ -136,6 +136,13 @@ struct {
 } events SEC(".maps");
 
 struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 32);  // Support up to 32 different event types
+    __type(key, u32);         // Event type ID
+    __type(value, u32);       // Sampling rate (0-100, representing percentage)
+} sampling_rates SEC(".maps");
+
+struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 1 << 16);
     __type(key, u64); // Address of g.id
@@ -148,6 +155,21 @@ struct {
     __type(key, u64); // Address of g.id
     __type(value, u64); // Timestamp of exit (unused for now)
 } goroutines_in_exit SEC(".maps");
+
+#define CHECK_SAMPLING(EVENT_TYPE) \
+        do { \
+            u32 event_type = (EVENT_TYPE); \
+            u32 *rate_ptr = bpf_map_lookup_elem(&sampling_rates, &event_type); \
+            if (rate_ptr) { \
+                u32 rate = *rate_ptr; \
+                if (rate < 100) { \
+                    u32 rand = bpf_get_prandom_u32() % 100; \
+                    if (rand >= rate) { \
+                        return 0; /* Skip this event */ \
+                    } \
+                } \
+            } \
+        } while (0)
 
 #define SEND_EVENT(EVENT_TYPE, G_ID, G_PARENT_ID, ATTR0, ATTR1, ATTR2, ATTR3, ATTR4, START_NS_U64) \
         do {                                                                                       \

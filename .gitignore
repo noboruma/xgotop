@@ -82,6 +82,8 @@ go.work
 .vscode/
 .DS_Store/
 *.log
+*.json
+/*.png
 
 # Go
 !go.mod
@@ -94,3 +96,9 @@ go.work
 # Storage
 /sessions/
 *.db
+
+# Binaries
+/xgotop
+/testserver
+/goroutinepadding
+/samplingtest

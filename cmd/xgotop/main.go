@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -41,6 +43,9 @@ var (
 
 	silent           = flag.Bool("s", false, "Enable silent mode")
 	metricFileSuffix = flag.String("mfs", "", "Suffix for metric file name")
+
+	// Sampling configuration
+	samplingRates = flag.String("sample", "", "Sampling rates for events (e.g., newgoroutine:0.1,makemap:0.5)")
 )
 
 const (
@@ -58,7 +63,74 @@ var (
 	// Global storage and API server for web mode
 	eventStore storage.EventStore
 	apiServer  *api.Server
+
+	// Event name to type mapping
+	eventNameToType = map[string]storage.EventType{
+		"casgstatus":   storage.EventTypeCasGStatus,
+		"makeslice":    storage.EventTypeMakeSlice,
+		"makemap":      storage.EventTypeMakeMap,
+		"newobject":    storage.EventTypeNewObject,
+		"newgoroutine": storage.EventTypeNewGoroutine,
+		"goexit":       storage.EventTypeGoExit,
+	}
 )
+
+// eventCounts tracks event counts by type
+type eventCounts struct {
+	casGStatus   atomic.Uint64
+	makeSlice    atomic.Uint64
+	makeMap      atomic.Uint64
+	newObject    atomic.Uint64
+	newGoroutine atomic.Uint64
+	goExit       atomic.Uint64
+}
+
+// parseSamplingRates parses the sampling rates from the command line flag
+func parseSamplingRates(ratesStr string) (map[storage.EventType]uint32, error) {
+	rates := make(map[storage.EventType]uint32)
+
+	if ratesStr == "" {
+		return rates, nil
+	}
+
+	pairs := strings.Split(ratesStr, ",")
+	for _, pair := range pairs {
+		parts := strings.Split(pair, ":")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid sampling rate format: %s", pair)
+		}
+
+		eventName := strings.TrimSpace(parts[0])
+		eventType, ok := eventNameToType[eventName]
+		if !ok {
+			return nil, fmt.Errorf("unknown event name: %s", eventName)
+		}
+
+		rate, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid rate for %s: %v", eventName, err)
+		}
+
+		if rate < 0 || rate > 1 {
+			return nil, fmt.Errorf("sampling rate must be between 0 and 1, got %f", rate)
+		}
+
+		// Convert to percentage (0-100)
+		rates[eventType] = uint32(rate * 100)
+	}
+
+	return rates, nil
+}
+
+// getEventName returns the name of an event type for logging
+func getEventName(eventType storage.EventType) string {
+	for name, et := range eventNameToType {
+		if et == eventType {
+			return name
+		}
+	}
+	return fmt.Sprintf("unknown(%d)", eventType)
+}
 
 func main() {
 	log.SetPrefix("xgotop: ")
@@ -156,6 +228,26 @@ func main() {
 	must(err, "loading objects")
 	defer objs.Close()
 
+	// Parse and apply sampling rates
+	rates, err := parseSamplingRates(*samplingRates)
+	if err != nil {
+		log.Fatalf("Failed to parse sampling rates: %v", err)
+	}
+
+	// Apply sampling rates to the eBPF map
+	if objs.SamplingRates != nil {
+		for eventType, rate := range rates {
+			key := uint32(eventType)
+			err := objs.SamplingRates.Update(&key, &rate, ebpf.UpdateAny)
+			if err != nil {
+				log.Fatalf("Failed to update sampling rate for event %d: %v", eventType, err)
+			}
+			log.Printf("Set sampling rate for %s to %d%%", getEventName(eventType), rate)
+		}
+	} else if *samplingRates != "" {
+		log.Printf("Warning: Sampling rates map not available, sampling will not be applied")
+	}
+
 	// Open an ELF binary and read its symbols.
 	ex, err := link.OpenExecutable(executablePath)
 	must(err, "opening executable")
@@ -192,22 +284,21 @@ func main() {
 
 	var eventCount atomic.Int64
 	var lastEventCount atomic.Int64
-	eventCount.Store(0)
-	lastEventCount.Store(0)
+	// eventCount.Store(0)
+	// lastEventCount.Store(0)
 
 	var readEventCount atomic.Uint64
 	var procEventCount atomic.Uint64
-	readEventCount.Store(0)
-	procEventCount.Store(0)
+	// readEventCount.Store(0)
+	// procEventCount.Store(0)
 
-	// [lock] {
-	// 	probeDurationNsSum u64
-	// 	probeDurationNsCount u64
-	// }
+	// Event counts by type
+	var eventCountsByType eventCounts
+
 	var probeDurationNsSum atomic.Int64
 	var probeDurationNsCount atomic.Int64
-	probeDurationNsSum.Store(0)
-	probeDurationNsCount.Store(0)
+	// probeDurationNsSum.Store(0)
+	// probeDurationNsCount.Store(0)
 
 	readersStopped := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -336,6 +427,7 @@ func main() {
 						probeDurationNsCount.Add(1)
 						probeDurationNsSum.Add(int64(event.ProbeDurationNs))
 						processEvent(i, event)
+						updateEventCounts(&eventCountsByType, event)
 					}
 					log.Printf("[PW-%d] Draining events channel complete", i)
 					return
@@ -349,6 +441,7 @@ func main() {
 					probeDurationNsCount.Add(1)
 					probeDurationNsSum.Add(int64(event.ProbeDurationNs))
 					processEvent(i, event)
+					updateEventCounts(&eventCountsByType, event)
 				}
 			}
 		}(i, &processWg, eventCh, readersStopped)
@@ -366,17 +459,26 @@ func main() {
 	log.Printf("All processors are done")
 
 	metrics := struct {
-		Rps []float64 `json:"rps"`
-		Pps []float64 `json:"pps"`
-		Ewp []float64 `json:"ewp"`
-		Lat []float64 `json:"lat"`
-		Ts  []float64 `json:"ts"`
+		Rps         []float64      `json:"rps"`
+		Pps         []float64      `json:"pps"`
+		Ewp         []float64      `json:"ewp"`
+		Lat         []float64      `json:"lat"`
+		Ts          []float64      `json:"ts"`
+		EventCounts map[int]uint64 `json:"event_counts"`
 	}{
 		Rps: metricRPS,
 		Pps: metricPPS,
 		Ewp: metricEWP,
 		Lat: metricLAT,
 		Ts:  metricTimestamps,
+		EventCounts: map[int]uint64{
+			0: eventCountsByType.casGStatus.Load(),
+			1: eventCountsByType.makeSlice.Load(),
+			2: eventCountsByType.makeMap.Load(),
+			3: eventCountsByType.newObject.Load(),
+			4: eventCountsByType.newGoroutine.Load(),
+			5: eventCountsByType.goExit.Load(),
+		},
 	}
 	b, err := json.MarshalIndent(metrics, "", "  ")
 	must(err, "marshaling metric data")
@@ -408,6 +510,24 @@ func reader(rd *ringbuf.Reader) (*ebpfGoRuntimeEventT, error) {
 	}
 
 	return &event, nil
+}
+
+//go:inline
+func updateEventCounts(counts *eventCounts, event *ebpfGoRuntimeEventT) {
+	switch event.EventType {
+	case 0: // EventTypeCasGStatus
+		counts.casGStatus.Add(1)
+	case 1: // EventTypeMakeSlice
+		counts.makeSlice.Add(1)
+	case 2: // EventTypeMakeMap
+		counts.makeMap.Add(1)
+	case 3: // EventTypeNewObject
+		counts.newObject.Add(1)
+	case 4: // EventTypeNewGoroutine
+		counts.newGoroutine.Add(1)
+	case 5: // EventTypeGoExit
+		counts.goExit.Add(1)
+	}
 }
 
 //go:inline
