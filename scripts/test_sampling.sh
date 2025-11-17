@@ -10,11 +10,11 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
-SAMPLINGTEST_BIN="./samplingtest"
+TESTSERVER_BIN="./testserver"
 XGOTOP_BIN="./xgotop"
 OUTPUT_DIR="./sampling_test_results"
-TEST_ITERATIONS=10000000
-TEST_GOROUTINES=20000
+TEST_DURATION=60  # Run test for 60 seconds
+CURL_URL="http://localhost/books/test-book-31/page/62"
 
 # Print colored message
 print_msg() {
@@ -42,13 +42,36 @@ run_test() {
     
     print_msg "$YELLOW" "\n=== Running test: $test_name ==="
     
+    # Start testserver first
+    print_msg "$GREEN" "Starting testserver..."
+    $TESTSERVER_BIN 2>&1 &
+    TESTSERVER_PID=$!
+    
+    # Give testserver time to start
+    sleep 2
+    
+    # Check if testserver is running
+    if ! kill -0 $TESTSERVER_PID 2>/dev/null; then
+        print_msg "$RED" "Error: testserver failed to start"
+        exit 1
+    fi
+    
+    # Verify testserver is responding
+    print_msg "$GREEN" "Verifying testserver is responding..."
+    if ! curl -s -f -m 2 "$CURL_URL" > /dev/null 2>&1; then
+        print_msg "$RED" "Error: testserver is not responding on $CURL_URL"
+        sudo kill -INT $TESTSERVER_PID 2>/dev/null || true
+        exit 1
+    fi
+    print_msg "$GREEN" "Testserver is ready!"
+    
     # Start xgotop with sampling configuration
     if [ -z "$sample_args" ]; then
         print_msg "$GREEN" "Starting xgotop (no sampling)..."
-        sudo $XGOTOP_BIN -b $SAMPLINGTEST_BIN -s -mfs "_${test_name}" &
+        sudo $XGOTOP_BIN -b $TESTSERVER_BIN -s -mfs "_${test_name}" &
     else
         print_msg "$GREEN" "Starting xgotop with sampling: $sample_args"
-        sudo $XGOTOP_BIN -b $SAMPLINGTEST_BIN -s -mfs "_${test_name}" --sample "$sample_args" &
+        sudo $XGOTOP_BIN -b $TESTSERVER_BIN -s -mfs "_${test_name}" --sample "$sample_args" &
     fi
     
     XGOTOP_PID=$!
@@ -59,12 +82,33 @@ run_test() {
     # Check if xgotop is still running
     if ! kill -0 $XGOTOP_PID 2>/dev/null; then
         print_msg "$RED" "Error: xgotop failed to start"
+        sudo kill -INT $TESTSERVER_PID 2>/dev/null || true
         exit 1
     fi
     
-    # Run the sampling test program
-    print_msg "$GREEN" "Running sampling test program..."
-    $SAMPLINGTEST_BIN -iterations $TEST_ITERATIONS -goroutines $TEST_GOROUTINES
+    # Start curl loop
+    print_msg "$GREEN" "Starting curl loop for $TEST_DURATION seconds..."
+    (while true; do curl -s "$CURL_URL" > /dev/null 2>&1; done) &
+    CURL_PID=$!
+    
+    # Run for specified duration
+    sleep $TEST_DURATION
+    
+    # Kill curl loop
+    print_msg "$YELLOW" "Stopping curl loop..."
+    kill $CURL_PID 2>/dev/null || true
+    wait $CURL_PID 2>/dev/null || true
+    
+    # Kill testserver (we already have its PID)
+    print_msg "$YELLOW" "Stopping testserver..."
+    if [ ! -z "$TESTSERVER_PID" ] && kill -0 $TESTSERVER_PID 2>/dev/null; then
+        sudo kill -INT $TESTSERVER_PID 2>/dev/null || true
+        sleep 1
+        # Force kill if still running
+        if kill -0 $TESTSERVER_PID 2>/dev/null; then
+            sudo kill -9 $TESTSERVER_PID 2>/dev/null || true
+        fi
+    fi
     
     # Give xgotop time to process remaining events
     sleep 2
