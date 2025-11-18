@@ -159,14 +159,15 @@ struct {
 #define CHECK_SAMPLING(EVENT_TYPE) \
         do { \
             u32 event_type = (EVENT_TYPE); \
+            u32 rate = 100; /* Default: capture all events if not specified */ \
             u32 *rate_ptr = bpf_map_lookup_elem(&sampling_rates, &event_type); \
             if (rate_ptr) { \
-                u32 rate = *rate_ptr; \
-                if (rate < 100) { \
-                    u32 rand = bpf_get_prandom_u32() % 100; \
-                    if (rand >= rate) { \
-                        return 0; /* Skip this event */ \
-                    } \
+                rate = *rate_ptr; \
+            } \
+            if (rate < 100) { \
+                u32 rand = bpf_get_prandom_u32() % 100; \
+                if (rand >= rate) { \
+                    return 0; /* Skip this event */ \
                 } \
             } \
         } while (0)

@@ -13,7 +13,7 @@ NC='\033[0m' # No Color
 TESTSERVER_BIN="./testserver"
 XGOTOP_BIN="./xgotop"
 OUTPUT_DIR="./sampling_test_results"
-TEST_DURATION=60  # Run test for 60 seconds
+TEST_REQUESTS=10000
 CURL_URL="http://localhost/books/test-book-31/page/62"
 
 # Print colored message
@@ -87,17 +87,14 @@ run_test() {
     fi
     
     # Start curl loop
-    print_msg "$GREEN" "Starting curl loop for $TEST_DURATION seconds..."
-    (while true; do curl -s "$CURL_URL" > /dev/null 2>&1; done) &
-    CURL_PID=$!
-    
-    # Run for specified duration
-    sleep $TEST_DURATION
-    
-    # Kill curl loop
-    print_msg "$YELLOW" "Stopping curl loop..."
-    kill $CURL_PID 2>/dev/null || true
-    wait $CURL_PID 2>/dev/null || true
+    print_msg "$GREEN" "Starting curl loop for $TEST_REQUESTS requests..."
+    for i in $(seq 1 $TEST_REQUESTS); do
+        curl -s "$CURL_URL" > /dev/null 2>&1
+    done
+
+    # Wait for all requests to complete
+    sleep 3
+    print_msg "$GREEN" "All requests completed!"
     
     # Kill testserver (we already have its PID)
     print_msg "$YELLOW" "Stopping testserver..."

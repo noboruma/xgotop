@@ -35,7 +35,7 @@ class SamplingResult:
     sampled_count: int
     expected_rate: float
     actual_rate: float
-    error_percentage: float
+    error: float
     within_tolerance: bool
 
 
@@ -114,8 +114,7 @@ def validate_sampling(
             continue
         
         actual_rate = sampled / baseline
-        expected_count = baseline * expected_rate
-        error = abs(actual_rate - expected_rate) / expected_rate if expected_rate > 0 else 0
+        error = actual_rate - expected_rate
         within_tolerance = error <= tolerance
         
         if not within_tolerance:
@@ -127,7 +126,7 @@ def validate_sampling(
             sampled_count=sampled,
             expected_rate=expected_rate,
             actual_rate=actual_rate,
-            error_percentage=error * 100,
+            error=error,
             within_tolerance=within_tolerance
         ))
     
@@ -146,13 +145,13 @@ def print_validation_report(results: List[SamplingResult]):
         status = "✓ PASS" if r.within_tolerance else "✗ FAIL"
         print(f"{r.event_type:<15} {r.baseline_count:<10} {r.sampled_count:<10} "
               f"{r.expected_rate*100:<12.1f} {r.actual_rate*100:<12.1f} "
-              f"{r.error_percentage:<10.2f} {status:<10}")
+              f"{r.error:<10.2f} {status:<10}")
     
     print("-"*80)
     
     # Summary statistics
     if results:
-        avg_error = sum(r.error_percentage for r in results) / len(results)
+        avg_error = sum(r.error for r in results) / len(results)
         pass_rate = sum(1 for r in results if r.within_tolerance) / len(results) * 100
         
         print(f"\nAverage Error: {avg_error:.2f}%")

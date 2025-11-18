@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -106,7 +107,7 @@ func parseSamplingRates(ratesStr string) (map[storage.EventType]uint32, error) {
 			return nil, fmt.Errorf("unknown event name: %s", eventName)
 		}
 
-		rate, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 32)
+		rate, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
 		if err != nil {
 			return nil, fmt.Errorf("invalid rate for %s: %v", eventName, err)
 		}
@@ -116,7 +117,9 @@ func parseSamplingRates(ratesStr string) (map[storage.EventType]uint32, error) {
 		}
 
 		// Convert to percentage (0-100)
-		rates[eventType] = uint32(rate * 100)
+		// Use math.Round to handle floating point precision issues
+		percentage := uint32(math.Round(rate * 100))
+		rates[eventType] = percentage
 	}
 
 	return rates, nil
