@@ -42,8 +42,9 @@ var (
 	storageFormat = flag.String("storage-format", "binary", "Storage format: binary, jsonl, or sqlite")
 	storageDir    = flag.String("storage-dir", "./sessions", "Directory for storing session data")
 
-	silent           = flag.Bool("s", false, "Enable silent mode")
-	metricFileSuffix = flag.String("mfs", "", "Suffix for metric file name")
+	silent                = flag.Bool("s", false, "Enable silent mode")
+	metricFilePrefix      = flag.String("mfp", "", "Prefix for metric file name")
+	metricFileNoTimestamp = flag.Bool("mft", false, "Do not include timestamp in metric file name")
 
 	// Sampling configuration
 	samplingRates = flag.String("sample", "", "Sampling rates for events (e.g., newgoroutine:0.1,makemap:0.5)")
@@ -485,11 +486,20 @@ func main() {
 	}
 	b, err := json.MarshalIndent(metrics, "", "  ")
 	must(err, "marshaling metric data")
-	if *metricFileSuffix != "" {
-		*metricFileSuffix = "_" + *metricFileSuffix
+	prefix := *metricFilePrefix
+	if prefix != "" {
+		prefix = "_" + prefix
 	}
+	filename := "metrics"
+	if !*metricFileNoTimestamp {
+		filename += "_" + time.Now().UTC().Format("2006-01-02-15-04-05")
+	}
+	if prefix != "" {
+		filename += "_" + prefix
+	}
+	filename += ".json"
 	err = os.WriteFile(
-		fmt.Sprintf("metrics_%s%s.json", time.Now().UTC().Format("2006-01-02-15-04-05"), *metricFileSuffix),
+		filename,
 		b, 0666,
 	)
 	must(err, "writing metrics")

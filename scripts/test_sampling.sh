@@ -13,8 +13,8 @@ NC='\033[0m' # No Color
 TESTSERVER_BIN="./testserver"
 XGOTOP_BIN="./xgotop"
 OUTPUT_DIR="./sampling_test_results"
-TEST_REQUESTS=10000
-CURL_URL="http://localhost/books/test-book-31/page/62"
+TEST_REQUESTS=5000
+CURL_URL="http://localhost/books/test-book/page/100"
 
 # Print colored message
 print_msg() {
@@ -68,10 +68,10 @@ run_test() {
     # Start xgotop with sampling configuration
     if [ -z "$sample_args" ]; then
         print_msg "$GREEN" "Starting xgotop (no sampling)..."
-        sudo $XGOTOP_BIN -b $TESTSERVER_BIN -s -mfs "_${test_name}" &
+        sudo $XGOTOP_BIN -b $TESTSERVER_BIN -s -mfp "${test_name}" &
     else
         print_msg "$GREEN" "Starting xgotop with sampling: $sample_args"
-        sudo $XGOTOP_BIN -b $TESTSERVER_BIN -s -mfs "_${test_name}" --sample "$sample_args" &
+        sudo $XGOTOP_BIN -b $TESTSERVER_BIN -s -mfp "${test_name}" --sample "$sample_args" &
     fi
     
     XGOTOP_PID=$!
@@ -118,7 +118,7 @@ run_test() {
     wait $XGOTOP_PID 2>/dev/null || true
     
     # Find the metrics file
-    local metrics_file=$(find . -name "metrics_*_${test_name}.json" -type f -mmin -1 | head -1)
+    local metrics_file=$(find . -name "metrics_*${test_name}.json" -type f -mmin -1 | head -1)
     if [ -z "$metrics_file" ]; then
         print_msg "$RED" "Error: Could not find metrics file for $test_name"
         return 1
