@@ -115,7 +115,7 @@ def validate_sampling(
         
         actual_rate = sampled / baseline
         error = actual_rate - expected_rate
-        within_tolerance = error <= tolerance
+        within_tolerance = abs(error) <= tolerance
         
         if not within_tolerance:
             all_valid = False
@@ -143,9 +143,15 @@ def print_validation_report(results: List[SamplingResult]):
     
     for r in results:
         status = "✓ PASS" if r.within_tolerance else "✗ FAIL"
+        # Format error percentage to avoid "-0.00"
+        error_pct = r.error * 100
+        if abs(error_pct) < 0.005:
+            error_str = "0.00"
+        else:
+            error_str = f"{error_pct:.2f}"
         print(f"{r.event_type:<15} {r.baseline_count:<10} {r.sampled_count:<10} "
               f"{r.expected_rate*100:<12.1f} {r.actual_rate*100:<12.1f} "
-              f"{r.error:<10.2f} {status:<10}")
+              f"{error_str:<10} {status:<10}")
     
     print("-"*80)
     
@@ -154,7 +160,14 @@ def print_validation_report(results: List[SamplingResult]):
         avg_error = sum(r.error for r in results) / len(results)
         pass_rate = sum(1 for r in results if r.within_tolerance) / len(results) * 100
         
-        print(f"\nAverage Error: {avg_error:.2f}%")
+        # Format average error to avoid "-0.00%"
+        avg_error_pct = avg_error * 100
+        if abs(avg_error_pct) < 0.005:
+            avg_error_str = "0.00"
+        else:
+            avg_error_str = f"{avg_error_pct:.2f}"
+        
+        print(f"\nAverage Error: {avg_error_str}%")
         print(f"Pass Rate: {pass_rate:.1f}%")
         
         if pass_rate == 100:
@@ -170,8 +183,8 @@ def main():
     parser.add_argument('sampled', help='Sampled metrics JSON file')
     parser.add_argument('rates', nargs='?', 
                        help='Sampling rates (e.g., "newgoroutine:0.1,makemap:0.2")')
-    parser.add_argument('--tolerance', type=float, default=10,
-                       help='Error tolerance percentage (default: 10%%)')
+    parser.add_argument('--tolerance', type=float, default=5,
+                       help='Error tolerance percentage (default: 5%%)')
     
     args = parser.parse_args()
     
@@ -192,7 +205,7 @@ def main():
         print("Warning: No sampling rates provided, inferring from data...")
     
     # Validate sampling
-    results, all_valid = validate_sampling(
+    results, _ = validate_sampling(
         baseline_counts,
         sampled_counts,
         sampling_rates,

@@ -156,40 +156,33 @@ struct {
     __type(value, u64); // Timestamp of exit (unused for now)
 } goroutines_in_exit SEC(".maps");
 
-#define CHECK_SAMPLING(EVENT_TYPE) \
-        do { \
-            u32 event_type = (EVENT_TYPE); \
-            u32 rate = 100; /* Default: capture all events if not specified */ \
-            u32 *rate_ptr = bpf_map_lookup_elem(&sampling_rates, &event_type); \
-            if (rate_ptr) { \
-                rate = *rate_ptr; \
-            } \
-            if (rate < 100) { \
-                u32 rand = bpf_get_prandom_u32() % 100; \
-                if (rand >= rate) { \
-                    return 0; /* Skip this event */ \
-                } \
-            } \
-        } while (0)
-
-#define SEND_EVENT(EVENT_TYPE, G_ID, G_PARENT_ID, ATTR0, ATTR1, ATTR2, ATTR3, ATTR4, START_NS_U64) \
-        do {                                                                                       \
-            go_runtime_event_t *e = bpf_ringbuf_reserve(&events, sizeof(go_runtime_event_t), 0);   \
-            if (!e) {                                                                              \
-                bpf_printk("Failed to reserve ringbuf");                                           \
-                return 0;                                                                          \
-            }                                                                                      \
-            e->timestamp = bpf_ktime_get_ns();                                                     \
-            e->event_type = (EVENT_TYPE);                                                          \
-            e->probe_duration_ns = (u32)(e->timestamp - (START_NS_U64));                           \
-            e->goroutine = (G_ID);                                                                 \
-            e->parent_goroutine = (G_PARENT_ID);                                                   \
-            e->attributes[0] = (ATTR0);                                                            \
-            e->attributes[1] = (ATTR1);                                                            \
-            e->attributes[2] = (ATTR2);                                                            \
-            e->attributes[3] = (ATTR3);                                                            \
-            e->attributes[4] = (ATTR4);                                                            \
-            bpf_ringbuf_submit(e, 0);                                                              \
+#define SEND_EVENT_WITH_SAMPLING(EVENT_TYPE, G_ID, G_PARENT_ID, ATTR0, ATTR1, ATTR2, ATTR3, ATTR4, START_NS_U64) \
+        do {                                                                                                     \
+            u32 event_type = (EVENT_TYPE);                                                                       \
+            u32 *rate_ptr = bpf_map_lookup_elem(&sampling_rates, &event_type);                                   \
+            if (rate_ptr) {                                                                                      \
+                u32 rate = *rate_ptr;                                                                            \
+                u32 rand = bpf_get_prandom_u32() % 100;                                                          \
+                if (rand >= rate) {                                                                              \
+                    break;                                                                                       \
+                }                                                                                                \
+            }                                                                                                    \
+            go_runtime_event_t *e = bpf_ringbuf_reserve(&events, sizeof(go_runtime_event_t), 0);                 \
+            if (!e) {                                                                                            \
+                bpf_printk("Failed to reserve ringbuf");                                                         \
+                break;                                                                                           \
+            }                                                                                                    \
+            e->timestamp = bpf_ktime_get_ns();                                                                   \
+            e->event_type = (EVENT_TYPE);                                                                        \
+            e->probe_duration_ns = (u32)(e->timestamp - (START_NS_U64));                                         \
+            e->goroutine = (G_ID);                                                                               \
+            e->parent_goroutine = (G_PARENT_ID);                                                                 \
+            e->attributes[0] = (ATTR0);                                                                          \
+            e->attributes[1] = (ATTR1);                                                                          \
+            e->attributes[2] = (ATTR2);                                                                          \
+            e->attributes[3] = (ATTR3);                                                                          \
+            e->attributes[4] = (ATTR4);                                                                          \
+            bpf_ringbuf_submit(e, 0);                                                                            \
         } while (0)
 
 __always_inline static int get_go_g_struct_arm(struct pt_regs *ctx, struct go_runtime_g *g) {
