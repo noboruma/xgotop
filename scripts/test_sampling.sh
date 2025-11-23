@@ -41,6 +41,11 @@ run_test() {
     local output_prefix="${OUTPUT_DIR}/${test_name}"
     
     print_msg "$YELLOW" "\n=== Running test: $test_name ==="
+
+    # Kill any existing processes
+    sudo pkill -f "$TESTSERVER_BIN" 2>/dev/null || true
+    sudo pkill -f "xgotop" 2>/dev/null || true
+    sleep 2
     
     # Start testserver first
     print_msg "$GREEN" "Starting testserver..."
