@@ -4,7 +4,7 @@ all: gen compile run-silent
 vmlinux:
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
 
-gen:
+gen: vmlinux
 	go generate
 
 compile: gen
@@ -14,6 +14,9 @@ compile: gen
 
 samplingtest: gen compile
 	./scripts/test_sampling.sh
+
+weboverheadtest: gen compile
+	./scripts/test_web_overhead.sh
 
 run:
 	sudo ./xgotop -b ./testserver -rw 1 -pw 1
