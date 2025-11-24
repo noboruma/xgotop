@@ -90,9 +90,8 @@ func (s *JSONLStore) WriteEvent(event *Event) error {
 		return fmt.Errorf("write newline: %w", err)
 	}
 
-	if err := s.writer.Flush(); err != nil {
-		return fmt.Errorf("flush writer: %w", err)
-	}
+	// NOTE: Removed per-event flush for performance - use WriteBatch for better performance
+	// Flush will happen on WriteBatch, Close, or when buffer is full
 
 	s.eventCount++
 	return nil

@@ -103,6 +103,21 @@ func (s *Server) BroadcastEvent(event *storage.Event) {
 	s.hub.Broadcast(data)
 }
 
+// BroadcastBatch broadcasts a batch of events to all connected WebSocket clients
+func (s *Server) BroadcastBatch(events []*storage.Event) {
+	// Send as an array for efficient client processing
+	data, err := json.Marshal(map[string]interface{}{
+		"type": "batch",
+		"events": events,
+	})
+	if err != nil {
+		log.Printf("Failed to marshal event batch: %v", err)
+		return
+	}
+
+	s.hub.Broadcast(data)
+}
+
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		s.listSessions(w, r)

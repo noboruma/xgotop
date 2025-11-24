@@ -367,21 +367,27 @@ def create_individual_file_plot(data, label, output_path, palette_name='vibrant'
     has_ewp = 'ewp' in data
     has_lat = 'lat' in data
     has_prc = 'prc' in data
+    has_bsz = 'bsz' in data
+    has_bps = 'bps' in data
+    has_bfl = 'bfl' in data
 
     # Determine layout based on available data
     # Row 1: RPS vs PPS and Event Counts (if available)
     # Row 2: EWP, Latency, Processing Time (if available)
-    n_rows = 2
+    # Row 3: BSZ, BPS, BFL (if available)
+    n_rows = 3 if any([has_bsz, has_bps, has_bfl]) else 2
 
     # For top row: max 2 columns (RPS/PPS and Event Counts)
     top_row_cols = 2 if has_event_counts else 1
-    # For bottom row: count of available metrics
-    bottom_row_cols = sum([has_ewp, has_lat, has_prc])
-    n_cols = max(top_row_cols, bottom_row_cols)
+    # For middle row: count of available metrics
+    middle_row_cols = sum([has_ewp, has_lat, has_prc])
+    # For bottom row: count of available batch metrics
+    bottom_row_cols = sum([has_bsz, has_bps, has_bfl])
+    n_cols = max(top_row_cols, middle_row_cols, bottom_row_cols)
 
     # Better figure size to prevent squished plots - double the width
-    fig_width = 12 * max(top_row_cols, bottom_row_cols)  # 16 inches per column for much wider plots
-    fig_height = 12  # Taller for better visibility (6 inches per row)
+    fig_width = 12 * n_cols  # 12 inches per column for much wider plots
+    fig_height = 6 * n_rows  # 6 inches per row
     fig = plt.figure(figsize=(fig_width, fig_height))
 
     # Add a bold title with shadow effect - moved higher up
@@ -389,7 +395,7 @@ def create_individual_file_plot(data, label, output_path, palette_name='vibrant'
                  fontsize=20, weight='black', y=0.98, color=COLORS['text'])
 
     # Create GridSpec for better control with more top margin to avoid title collision
-    gs = gridspec.GridSpec(2, n_cols, figure=fig, hspace=0.35, wspace=0.15, top=0.88, bottom=0.05)
+    gs = gridspec.GridSpec(n_rows, n_cols, figure=fig, hspace=0.35, wspace=0.15, top=0.88, bottom=0.05)
 
     # Plot 1: RPS vs PPS (top left)
     if n_cols > top_row_cols and top_row_cols == 1:
@@ -586,16 +592,7 @@ def create_individual_file_plot(data, label, output_path, palette_name='vibrant'
         x_values = get_time_values(len(data['ewp']))
         ewp_values = np.array(data['ewp'])
 
-        # Shadow
-        shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
-        shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
-        x_offset = x_values[-1] * 0.003 if len(x_values) > 0 else 0
-        y_offset = max(1, (max(ewp_values) - min(ewp_values)) * 0.01) if len(ewp_values) > 0 else 1
-
-        ax_ewp.plot(x_values + x_offset, ewp_values - y_offset,
-                   color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
-
-        # Main plot
+        # Main plot (no shadow in aggregate)
         ax_ewp.plot(x_values, ewp_values,
                    color=COLORS['quaternary'], linewidth=4, zorder=2)
 
@@ -648,16 +645,7 @@ def create_individual_file_plot(data, label, output_path, palette_name='vibrant'
         # Values are already in nanoseconds
         lat_values = np.array(data['lat'])
 
-        # Shadow
-        shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
-        shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
-        x_offset = x_values[-1] * 0.003 if len(x_values) > 0 else 0
-        y_offset = (max(lat_values) - min(lat_values)) * 0.01 if len(lat_values) > 0 else 0
-
-        ax_lat.plot(x_values + x_offset, lat_values - y_offset,
-                   color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
-
-        # Main plot
+        # Main plot (no shadow in aggregate)
         ax_lat.plot(x_values, lat_values,
                    color=COLORS.get('septenary', '#FF1744'), linewidth=4, zorder=2)
 
@@ -709,19 +697,7 @@ def create_individual_file_plot(data, label, output_path, palette_name='vibrant'
         x_values = get_time_values(len(data['prc']))
         prc_values = np.array(data['prc'])
 
-        # Shadow
-        shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
-        shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
-        x_offset = x_values[-1] * 0.003 if len(x_values) > 0 else 0
-        if len(prc_values) > 0 and prc_values.max() > prc_values.min():
-            y_offset = (prc_values.max() - prc_values.min()) * 0.01
-        else:
-            y_offset = 1
-
-        ax_prc.plot(x_values + x_offset, prc_values - y_offset,
-                   color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
-
-        # Main plot
+        # Main plot (no shadow in aggregate)
         ax_prc.plot(x_values, prc_values,
                    color=COLORS.get('octonary', '#00E676'), linewidth=4, zorder=2)
 
@@ -765,6 +741,123 @@ def create_individual_file_plot(data, label, output_path, palette_name='vibrant'
 
         for spine in ax_prc.spines.values():
             spine.set_linewidth(4)
+
+    # Plot Batch Metrics (Row 3) - only if we have batch metrics
+    if n_rows > 2:
+        batch_plot_idx = 0
+
+        # Plot BSZ (Batch Size)
+        if has_bsz:
+            ax_bsz = fig.add_subplot(gs[2, batch_plot_idx])
+            batch_plot_idx += 1
+
+            x_values = get_time_values(len(data['bsz']))
+            bsz_values = np.array(data['bsz'])
+
+            # Main plot (no shadow in aggregate)
+            ax_bsz.plot(x_values, bsz_values,
+                       color=COLORS.get('primary', '#FF6B6B'), linewidth=4, zorder=2)
+
+            # Fill under the curve
+            ax_bsz.fill_between(x_values, 0, bsz_values,
+                               alpha=0.3, color=COLORS.get('primary', '#FF6B6B'), zorder=1)
+
+            ax_bsz.set_title('BATCH SIZE (events/batch)',
+                            fontsize=14, weight='black', pad=10, color=COLORS['text'])
+            ax_bsz.set_xlabel('TIME (seconds)', fontsize=10, weight='bold', color=COLORS['text'])
+            ax_bsz.set_ylabel('EVENTS', fontsize=10, weight='bold', color=COLORS['text'])
+            ax_bsz.tick_params(colors=COLORS['text'], which='both')
+            ax_bsz.grid(True, alpha=0.3, color=COLORS['text'], linewidth=1, linestyle='--')
+
+            # Add stats annotation
+            avg_bsz = np.mean(bsz_values)
+            max_bsz = np.max(bsz_values)
+            min_bsz = np.min(bsz_values)
+            ax_bsz.text(0.02, 0.98, f'AVG: {avg_bsz:.1f}\nMIN: {min_bsz:.1f}\nMAX: {max_bsz:.1f}',
+                       transform=ax_bsz.transAxes,
+                       fontsize=10, weight='bold',
+                       verticalalignment='top',
+                       bbox=dict(boxstyle='round,pad=0.5',
+                                facecolor='white', alpha=0.8,
+                                edgecolor=COLORS.get('primary', '#FF6B6B'), linewidth=2))
+
+            for spine in ax_bsz.spines.values():
+                spine.set_linewidth(4)
+
+        # Plot BPS (Batches Per Second)
+        if has_bps:
+            ax_bps = fig.add_subplot(gs[2, batch_plot_idx])
+            batch_plot_idx += 1
+
+            x_values = get_time_values(len(data['bps']))
+            bps_values = np.array(data['bps'])
+
+            # Main plot (no shadow in aggregate)
+            ax_bps.plot(x_values, bps_values,
+                       color=COLORS.get('secondary', '#4ECDC4'), linewidth=4, zorder=2)
+
+            # Fill under the curve
+            ax_bps.fill_between(x_values, 0, bps_values,
+                               alpha=0.3, color=COLORS.get('secondary', '#4ECDC4'), zorder=1)
+
+            ax_bps.set_title('BATCHES PER SECOND',
+                            fontsize=14, weight='black', pad=10, color=COLORS['text'])
+            ax_bps.set_xlabel('TIME (seconds)', fontsize=10, weight='bold', color=COLORS['text'])
+            ax_bps.set_ylabel('BATCHES/SEC', fontsize=10, weight='bold', color=COLORS['text'])
+            ax_bps.tick_params(colors=COLORS['text'], which='both')
+            ax_bps.grid(True, alpha=0.3, color=COLORS['text'], linewidth=1, linestyle='--')
+
+            # Add stats annotation
+            avg_bps = np.mean(bps_values)
+            max_bps = np.max(bps_values)
+            min_bps = np.min(bps_values)
+            ax_bps.text(0.02, 0.98, f'AVG: {avg_bps:.2f}/s\nMIN: {min_bps:.2f}/s\nMAX: {max_bps:.2f}/s',
+                       transform=ax_bps.transAxes,
+                       fontsize=10, weight='bold',
+                       verticalalignment='top',
+                       bbox=dict(boxstyle='round,pad=0.5',
+                                facecolor='white', alpha=0.8,
+                                edgecolor=COLORS.get('secondary', '#4ECDC4'), linewidth=2))
+
+            for spine in ax_bps.spines.values():
+                spine.set_linewidth(4)
+
+        # Plot BFL (Batch Flush Latency)
+        if has_bfl:
+            ax_bfl = fig.add_subplot(gs[2, batch_plot_idx])
+
+            x_values = get_time_values(len(data['bfl']))
+            bfl_values = np.array(data['bfl'])
+
+            # Main plot (no shadow in aggregate)
+            ax_bfl.plot(x_values, bfl_values,
+                       color=COLORS.get('tertiary', '#FFD93D'), linewidth=4, zorder=2)
+
+            # Fill under the curve
+            ax_bfl.fill_between(x_values, 0, bfl_values,
+                               alpha=0.3, color=COLORS.get('tertiary', '#FFD93D'), zorder=1)
+
+            ax_bfl.set_title('BATCH FLUSH LATENCY (ns/batch)',
+                            fontsize=14, weight='black', pad=10, color=COLORS['text'])
+            ax_bfl.set_xlabel('TIME (seconds)', fontsize=10, weight='bold', color=COLORS['text'])
+            ax_bfl.set_ylabel('NANOSECONDS', fontsize=10, weight='bold', color=COLORS['text'])
+            ax_bfl.tick_params(colors=COLORS['text'], which='both')
+            ax_bfl.grid(True, alpha=0.3, color=COLORS['text'], linewidth=1, linestyle='--')
+
+            # Add stats annotation
+            avg_bfl = np.mean(bfl_values)
+            max_bfl = np.max(bfl_values)
+            min_bfl = np.min(bfl_values)
+            ax_bfl.text(0.02, 0.98, f'AVG: {avg_bfl:.1f} ns\nMIN: {min_bfl:.1f} ns\nMAX: {max_bfl:.1f} ns',
+                       transform=ax_bfl.transAxes,
+                       fontsize=10, weight='bold',
+                       verticalalignment='top',
+                       bbox=dict(boxstyle='round,pad=0.5',
+                                facecolor='white', alpha=0.8,
+                                edgecolor=COLORS.get('tertiary', '#FFD93D'), linewidth=2))
+
+            for spine in ax_bfl.spines.values():
+                spine.set_linewidth(4)
 
     # GridSpec handles all layout now, no need for additional adjustment
 

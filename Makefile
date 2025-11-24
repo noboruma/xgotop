@@ -16,7 +16,7 @@ samplingtest: gen compile
 	./scripts/test_sampling.sh
 
 weboverheadtest: gen compile
-	./scripts/test_web_overhead.sh -r "1 2 4 8 16" -p "1" --only-web --flood -n 20000
+	./scripts/test_web_overhead.sh -r "1 2 4 8 16 32 64 128" -p "1" --storage "jsonl sqlite" --only-web --flood -n 50000
 
 run:
 	sudo ./xgotop -b ./testserver -rw 1 -pw 1

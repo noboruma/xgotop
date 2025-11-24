@@ -39,7 +39,7 @@ var (
 	// Web mode flags
 	webMode       = flag.Bool("web", false, "Enable web mode with API server and WebSocket")
 	webPort       = flag.Int("web-port", 8080, "Port for web API server")
-	storageFormat = flag.String("storage-format", "binary", "Storage format: binary, jsonl, or sqlite")
+	storageFormat = flag.String("storage-format", "jsonl", "Storage format: jsonl or sqlite")
 	storageDir    = flag.String("storage-dir", "./sessions", "Directory for storing session data")
 
 	silent                = flag.Bool("s", false, "Enable silent mode")
@@ -48,6 +48,10 @@ var (
 
 	// Sampling configuration
 	samplingRates = flag.String("sample", "", "Sampling rates for events (e.g., newgoroutine:0.1,makemap:0.5)")
+
+	// Batch configuration
+	batchSize          = flag.Int("batch-size", 1000, "Number of events to batch before writing to storage")
+	batchFlushInterval = flag.Duration("batch-flush-interval", 100*time.Millisecond, "Maximum time to wait before flushing a batch")
 )
 
 const (
@@ -321,7 +325,13 @@ func main() {
 	metricEWP := make([]float64, 0, 1_000)
 	metricLAT := make([]float64, 0, 1_000)
 	metricPRC := make([]float64, 0, 1_000)
+	metricBSZ := make([]float64, 0, 1_000) // Batch Size
+	metricBPS := make([]float64, 0, 1_000) // Batches Per Second
+	metricBFL := make([]float64, 0, 1_000) // Batch Flush Latency
 	metricTimestamps := make([]float64, 0, 1_000)
+
+	// Batch metrics tracking
+	var batchSizeSum, batchSizeCount, batchesPerSecond, batchFlushLatencySum, batchFlushLatencyCount atomic.Int64
 
 	// Monitor for stop signals and close the ringbuffer reader to unblock all readers
 	go func() {
@@ -389,10 +399,45 @@ func main() {
 					procSum := processingTimeNsSum.Load()
 					procAvg := procSum / procCnt
 					procTime = float64(procAvg)
-					log.Printf("[Stats] PRC: %d ns/event\n\n", procAvg)
+					log.Printf("[Stats] PRC: %d ns/event", procAvg)
 				} else {
-					log.Printf("[Stats] PRC: NaN\n\n")
+					log.Printf("[Stats] PRC: NaN")
 					procTime = 0
+				}
+
+				// Batch stats
+				var batchSize, batchFlushLatency, batchesPerSec float64
+				bszCnt := batchSizeCount.Load()
+				if bszCnt != 0 {
+					bszSum := batchSizeSum.Load()
+					bszAvg := bszSum / bszCnt
+					batchSize = float64(bszAvg)
+					log.Printf("[Stats] BSZ: %d events/batch", bszAvg)
+				} else {
+					log.Printf("[Stats] BSZ: NaN")
+					batchSize = 0
+				}
+
+				// Batches per second
+				bps := batchesPerSecond.Load()
+				if bps != 0 {
+					batchesPerSec = float64(bps) / 1000.0 // Divide by 1000 as we stored it multiplied
+					log.Printf("[Stats] BPS: %.2f batches/sec", batchesPerSec)
+				} else {
+					log.Printf("[Stats] BPS: NaN")
+					batchesPerSec = 0
+				}
+
+				// Batch flush latency
+				bflCnt := batchFlushLatencyCount.Load()
+				if bflCnt != 0 {
+					bflSum := batchFlushLatencySum.Load()
+					bflAvg := bflSum / bflCnt
+					batchFlushLatency = float64(bflAvg)
+					log.Printf("[Stats] BFL: %d ns/batch\n\n", bflAvg)
+				} else {
+					log.Printf("[Stats] BFL: NaN\n\n")
+					batchFlushLatency = 0
 				}
 
 				metricRPS = append(metricRPS, rps)
@@ -400,6 +445,9 @@ func main() {
 				metricEWP = append(metricEWP, float64(ec))
 				metricLAT = append(metricLAT, lat)
 				metricPRC = append(metricPRC, procTime)
+				metricBSZ = append(metricBSZ, batchSize)
+				metricBPS = append(metricBPS, batchesPerSec)
+				metricBFL = append(metricBFL, batchFlushLatency)
 				metricTimestamps = append(metricTimestamps, float64(time.Now().UTC().UnixNano()))
 			}
 		}
@@ -440,6 +488,60 @@ func main() {
 			}()
 			log.Printf("[PW-%d] I'm alive!", i)
 
+			// Batch accumulator
+			batch := make([]*storage.Event, 0, *batchSize)
+			batchEbpfEvents := make([]*ebpfGoRuntimeEventT, 0, *batchSize)
+			flushTimer := time.NewTimer(*batchFlushInterval)
+			lastBatchTime := time.Now()
+
+			// Helper function to flush the batch
+			flushBatch := func() {
+				if len(batch) == 0 {
+					return
+				}
+
+				batchStart := time.Now()
+
+				// Write batch to storage if web mode is enabled
+				if *webMode && eventStore != nil {
+					if err := eventStore.WriteBatch(batch); err != nil {
+						log.Printf("[PW-%d] Failed to write batch to storage: %v", id, err)
+					}
+
+					// Broadcast batch to WebSocket clients
+					if apiServer != nil {
+						apiServer.BroadcastBatch(batch)
+					}
+				}
+
+				// Log events if not in web mode
+				if !*webMode && !*silent {
+					for _, ebpfEvent := range batchEbpfEvents {
+						logEvent(id, ebpfEvent)
+					}
+				}
+
+				// Track batch metrics
+				batchDuration := time.Since(batchStart).Nanoseconds()
+				batchFlushLatencySum.Add(batchDuration)
+				batchFlushLatencyCount.Add(1)
+				batchSizeSum.Add(int64(len(batch)))
+				batchSizeCount.Add(1)
+
+				// Calculate batches per second
+				timeSinceLastBatch := time.Since(lastBatchTime)
+				if timeSinceLastBatch > 0 {
+					bps := float64(time.Second) / float64(timeSinceLastBatch)
+					batchesPerSecond.Store(int64(bps * 1000)) // Store as int64 (multiplied by 1000)
+				}
+				lastBatchTime = time.Now()
+
+				// Clear the batch
+				batch = batch[:0]
+				batchEbpfEvents = batchEbpfEvents[:0]
+				flushTimer.Reset(*batchFlushInterval)
+			}
+
 			for {
 				select {
 				case <-readersStopped:
@@ -450,17 +552,33 @@ func main() {
 						probeDurationNsCount.Add(1)
 						probeDurationNsSum.Add(int64(event.ProbeDurationNs))
 						processStart := time.Now()
-						processEvent(i, event)
+
+						// Add to batch
+						storageEvent := convertToStorageEvent(event)
+						batch = append(batch, storageEvent)
+						batchEbpfEvents = append(batchEbpfEvents, event)
+
 						processDuration := time.Since(processStart).Nanoseconds()
 						processingTimeNsSum.Add(processDuration)
 						processingTimeNsCount.Add(1)
 						updateEventCounts(&eventCountsByType, event)
+
+						// Flush if batch is full
+						if len(batch) >= *batchSize {
+							flushBatch()
+						}
 					}
+					// Flush any remaining events
+					flushBatch()
 					log.Printf("[PW-%d] Draining events channel complete", i)
 					return
+				case <-flushTimer.C:
+					// Flush on timer
+					flushBatch()
 				case event, ok := <-eventCh: // ', ok' idiom is used to prevent race condition
 					if !ok {
-						// Channel is closed, no more events
+						// Channel is closed, flush remaining and exit
+						flushBatch()
 						return
 					}
 					eventCount.Add(-1)
@@ -468,11 +586,21 @@ func main() {
 					probeDurationNsCount.Add(1)
 					probeDurationNsSum.Add(int64(event.ProbeDurationNs))
 					processStart := time.Now()
-					processEvent(i, event)
+
+					// Add to batch
+					storageEvent := convertToStorageEvent(event)
+					batch = append(batch, storageEvent)
+					batchEbpfEvents = append(batchEbpfEvents, event)
+
 					processDuration := time.Since(processStart).Nanoseconds()
 					processingTimeNsSum.Add(processDuration)
 					processingTimeNsCount.Add(1)
 					updateEventCounts(&eventCountsByType, event)
+
+					// Flush if batch is full
+					if len(batch) >= *batchSize {
+						flushBatch()
+					}
 				}
 			}
 		}(i, &processWg, eventCh, readersStopped)
@@ -495,6 +623,9 @@ func main() {
 		Ewp         []float64      `json:"ewp"`
 		Lat         []float64      `json:"lat"`
 		Prc         []float64      `json:"prc"`
+		Bsz         []float64      `json:"bsz"`
+		Bps         []float64      `json:"bps"`
+		Bfl         []float64      `json:"bfl"`
 		Ts          []float64      `json:"ts"`
 		EventCounts map[int]uint64 `json:"event_counts"`
 	}{
@@ -503,6 +634,9 @@ func main() {
 		Ewp: metricEWP,
 		Lat: metricLAT,
 		Prc: metricPRC,
+		Bsz: metricBSZ,
+		Bps: metricBPS,
+		Bfl: metricBFL,
 		Ts:  metricTimestamps,
 		EventCounts: map[int]uint64{
 			0: eventCountsByType.casGStatus.Load(),
@@ -573,46 +707,33 @@ func updateEventCounts(counts *eventCounts, event *ebpfGoRuntimeEventT) {
 }
 
 //go:inline
-func processEvent(id int, event *ebpfGoRuntimeEventT) {
-	// Convert to storage event format
-	storageEvent := &storage.Event{
+func convertToStorageEvent(event *ebpfGoRuntimeEventT) *storage.Event {
+	return &storage.Event{
 		Timestamp:       event.Timestamp,
 		EventType:       storage.EventType(event.EventType),
 		Goroutine:       event.Goroutine,
 		ParentGoroutine: event.ParentGoroutine,
 		Attributes:      event.Attributes,
 	}
+}
 
-	// Write to storage if web mode is enabled
-	if *webMode && eventStore != nil {
-		if err := eventStore.WriteEvent(storageEvent); err != nil {
-			log.Printf("[PW-%d] Failed to write event to storage: %v", id, err)
-		}
-
-		// Broadcast to WebSocket clients
-		if apiServer != nil {
-			apiServer.BroadcastEvent(storageEvent)
-		}
-	}
-
-	// Log events (can be disabled in web mode if desired)
-	if !*webMode && !*silent {
-		switch event.EventType {
-		case 0:
-			log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d state %d -> %d", id, event.Timestamp, event.ProbeDurationNs, event.Attributes[2], event.Attributes[0], event.Attributes[1])
-		case 1:
-			log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d allocated slice []%s with length %d and capacity %d", id, event.Timestamp, event.ProbeDurationNs, event.Goroutine, kindToString(Kind(event.Attributes[1])), event.Attributes[2], event.Attributes[3])
-		case 2:
-			log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d allocated map[%s]%s with initial capacity %d", id, event.Timestamp, event.ProbeDurationNs, event.Goroutine, kindToString(Kind(event.Attributes[1])), kindToString(Kind(event.Attributes[2])), event.Attributes[3])
-		case 3:
-			log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d allocated object of size %d and kind %s", id, event.Timestamp, event.ProbeDurationNs, event.Goroutine, event.Attributes[0], kindToString(Kind(event.Attributes[1])))
-		case 4:
-			log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d created new goroutine %d", id, event.Timestamp, event.ProbeDurationNs, event.Attributes[0], event.Attributes[1])
-		case 5:
-			log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d exited", id, event.Timestamp, event.ProbeDurationNs, event.Attributes[0])
-		default:
-			log.Printf("[PW-%d] UNKNOWN EVENT TYPE: %d", id, event.EventType)
-		}
+//go:inline
+func logEvent(id int, event *ebpfGoRuntimeEventT) {
+	switch event.EventType {
+	case 0:
+		log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d state %d -> %d", id, event.Timestamp, event.ProbeDurationNs, event.Attributes[2], event.Attributes[0], event.Attributes[1])
+	case 1:
+		log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d allocated slice []%s with length %d and capacity %d", id, event.Timestamp, event.ProbeDurationNs, event.Goroutine, kindToString(Kind(event.Attributes[1])), event.Attributes[2], event.Attributes[3])
+	case 2:
+		log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d allocated map[%s]%s with initial capacity %d", id, event.Timestamp, event.ProbeDurationNs, event.Goroutine, kindToString(Kind(event.Attributes[1])), kindToString(Kind(event.Attributes[2])), event.Attributes[3])
+	case 3:
+		log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d allocated object of size %d and kind %s", id, event.Timestamp, event.ProbeDurationNs, event.Goroutine, event.Attributes[0], kindToString(Kind(event.Attributes[1])))
+	case 4:
+		log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d created new goroutine %d", id, event.Timestamp, event.ProbeDurationNs, event.Attributes[0], event.Attributes[1])
+	case 5:
+		log.Printf("[PW-%d] [ts:%d,lat:%d] goroutine %d exited", id, event.Timestamp, event.ProbeDurationNs, event.Attributes[0])
+	default:
+		log.Printf("[PW-%d] UNKNOWN EVENT TYPE: %d", id, event.EventType)
 	}
 }
 

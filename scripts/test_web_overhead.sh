@@ -45,6 +45,7 @@ READERS_RANGE="1 2 3 4 5"
 PROCESSORS_RANGE="1 2 3 4 5"
 WEB_MODES="0 1"  # By default test both modes
 FLOOD_MODE=false  # Default to normal mode (wait for responses)
+STORAGE_FORMATS="jsonl"  # Default storage formats to test (can be "jsonl sqlite" for both)
 
 # Print colored message
 print_msg() {
@@ -68,10 +69,11 @@ run_test() {
     local readers_count=$1
     local processors_count=$2
     local web_mode=$3
-    local metrics_file_prefix="readers_${readers_count}_processors_${processors_count}_web_${web_mode}"
+    local storage_format=$4
+    local metrics_file_prefix="readers_${readers_count}_processors_${processors_count}_web_${web_mode}_${storage_format}"
     local output_prefix="${OUTPUT_DIR}/${metrics_file_prefix}"
 
-    print_msg "$YELLOW" "\n=== Running test: $readers_count readers, $processors_count processors, web mode $web_mode ==="
+    print_msg "$YELLOW" "\n=== Running test: $readers_count readers, $processors_count processors, web mode $web_mode, storage $storage_format ==="
 
     # Enable cleanup on interrupt from this point
     SHOULD_CLEANUP=true
@@ -105,8 +107,8 @@ run_test() {
     print_msg "$GREEN" "Testserver is ready!"
         
     if [ $web_mode -eq 1 ]; then
-        print_msg "$GREEN" "Starting xgotop with web mode, $readers_count readers, $processors_count processors"
-        sudo $XGOTOP_BIN -b $TESTSERVER_BIN -s -web -rw $readers_count -pw $processors_count -mfp "${metrics_file_prefix}" &
+        print_msg "$GREEN" "Starting xgotop with web mode, $readers_count readers, $processors_count processors, storage: $storage_format"
+        sudo $XGOTOP_BIN -b $TESTSERVER_BIN -s -web -storage-format "$storage_format" -rw $readers_count -pw $processors_count -mfp "${metrics_file_prefix}" &
     else
         print_msg "$GREEN" "Starting xgotop with no web mode, $readers_count readers, $processors_count processors"
         sudo $XGOTOP_BIN -b $TESTSERVER_BIN -s -rw $readers_count -pw $processors_count -mfp "${metrics_file_prefix}" &
@@ -244,11 +246,13 @@ generate_plots() {
     for r in $READERS_RANGE; do
         for p in $PROCESSORS_RANGE; do
             for w in $WEB_MODES; do
-                local label="r${r}_p${p}_w${w}"
-                local file_path="${OUTPUT_DIR}/readers_${r}_processors_${p}_web_${w}_metrics.json"
-                if [ -f "$file_path" ]; then
-                    files_args="${files_args} '${label}:${file_path}'"
-                fi
+                for s in $STORAGE_FORMATS; do
+                    local label="r${r}_p${p}_w${w}_${s}"
+                    local file_path="${OUTPUT_DIR}/readers_${r}_processors_${p}_web_${w}_${s}_metrics.json"
+                    if [ -f "$file_path" ]; then
+                        files_args="${files_args} '${label}:${file_path}'"
+                    fi
+                done
             done
         done
     done
@@ -310,6 +314,10 @@ parse_args() {
                 FLOOD_MODE=true
                 shift
                 ;;
+            --storage)
+                STORAGE_FORMATS="$2"
+                shift 2
+                ;;
             -h|--help)
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
@@ -320,6 +328,7 @@ parse_args() {
                 echo "  --only-web              Test only with web mode enabled"
                 echo "  --no-web                Test only with web mode disabled"
                 echo "  --flood                 Flood mode - run curl requests in background without waiting"
+                echo "  --storage FORMATS      Storage formats to test: 'jsonl', 'sqlite', or 'jsonl sqlite' (default: jsonl)"
                 echo "  --no-plot               Skip plot generation after tests"
                 echo "  -h, --help              Show this help message"
                 echo ""
@@ -330,6 +339,7 @@ parse_args() {
                 echo "  $0 --only-web                        # Test only with web mode enabled"
                 echo "  $0 --no-web                          # Test only with web mode disabled"
                 echo "  $0 --flood -n 50000                  # Flood mode with 50000 concurrent requests"
+                echo "  $0 --storage 'jsonl sqlite'          # Test both storage formats"
                 echo "  $0 -n 5000 --no-plot                 # 5000 requests, no plotting"
                 exit 0
                 ;;
@@ -353,6 +363,7 @@ main() {
     print_msg "$BLUE" "  Processors: $PROCESSORS_RANGE"
     print_msg "$BLUE" "  Requests per test: $TEST_REQUESTS"
     print_msg "$BLUE" "  Output directory: $OUTPUT_DIR"
+    print_msg "$BLUE" "  Storage formats: $STORAGE_FORMATS"
 
     # Show web mode configuration
     if [ "$WEB_MODES" = "1" ]; then
@@ -376,15 +387,18 @@ main() {
     local reader_count=$(echo $READERS_RANGE | wc -w)
     local processor_count=$(echo $PROCESSORS_RANGE | wc -w)
     local web_mode_count=$(echo $WEB_MODES | wc -w)
-    total_tests=$((reader_count * processor_count * web_mode_count))
+    local storage_count=$(echo $STORAGE_FORMATS | wc -w)
+    total_tests=$((reader_count * processor_count * web_mode_count * storage_count))
     current_test=0
 
     for readers in $READERS_RANGE; do
         for processors in $PROCESSORS_RANGE; do
             for web_mode in $WEB_MODES; do
-                current_test=$((current_test + 1))
-                print_msg "$YELLOW" "\n>>> Progress: $current_test/$total_tests tests"
-                run_test $readers $processors $web_mode
+                for storage in $STORAGE_FORMATS; do
+                    current_test=$((current_test + 1))
+                    print_msg "$YELLOW" "\n>>> Progress: $current_test/$total_tests tests"
+                    run_test $readers $processors $web_mode $storage
+                done
             done
         done
     done
