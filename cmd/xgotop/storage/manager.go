@@ -71,7 +71,10 @@ func (m *Manager) OpenSession(ctx context.Context, id string) (EventStore, error
 
 	sessionDir := filepath.Join(m.baseDir, id)
 
-	// Detect format based on files present (binary format removed, use protobuf in future)
+	// Detect format based on files present
+	if _, err := os.Stat(filepath.Join(sessionDir, "events.pb")); err == nil {
+		return OpenProtobufStore(m.baseDir, id)
+	}
 	if _, err := os.Stat(filepath.Join(sessionDir, "events.jsonl")); err == nil {
 		return OpenJSONLStore(m.baseDir, id)
 	}
@@ -104,8 +107,10 @@ func (m *Manager) CreateSession(ctx context.Context, session *Session, format st
 		return NewJSONLStore(m.baseDir, session)
 	case "sqlite", "sql", "db":
 		return NewSQLiteStore(m.baseDir, session)
+	case "protobuf", "pb", "proto":
+		return NewProtobufStore(m.baseDir, session)
 	default:
-		return nil, fmt.Errorf("unknown format: %s (supported: jsonl, sqlite)", format)
+		return nil, fmt.Errorf("unknown format: %s (supported: jsonl, sqlite, protobuf)", format)
 	}
 }
 

@@ -45,7 +45,7 @@ READERS_RANGE="1 2 3 4 5"
 PROCESSORS_RANGE="1 2 3 4 5"
 WEB_MODES="0 1"  # By default test both modes
 FLOOD_MODE=false  # Default to normal mode (wait for responses)
-STORAGE_FORMATS="jsonl"  # Default storage formats to test (can be "jsonl sqlite" for both)
+STORAGE_FORMATS="jsonl"  # Default storage formats to test (can be "jsonl sqlite protobuf" for all)
 
 # Print colored message
 print_msg() {
@@ -110,8 +110,8 @@ run_test() {
         print_msg "$GREEN" "Starting xgotop with web mode, $readers_count readers, $processors_count processors, storage: $storage_format"
         sudo $XGOTOP_BIN -b $TESTSERVER_BIN -s -web -storage-format "$storage_format" -rw $readers_count -pw $processors_count -mfp "${metrics_file_prefix}" &
     else
-        print_msg "$GREEN" "Starting xgotop with no web mode, $readers_count readers, $processors_count processors"
-        sudo $XGOTOP_BIN -b $TESTSERVER_BIN -s -rw $readers_count -pw $processors_count -mfp "${metrics_file_prefix}" &
+        print_msg "$GREEN" "Starting xgotop with no web mode, $readers_count readers, $processors_count processors, storage: $storage_format"
+        sudo $XGOTOP_BIN -b $TESTSERVER_BIN -s -storage-format "$storage_format" -rw $readers_count -pw $processors_count -mfp "${metrics_file_prefix}" &
     fi
     
     XGOTOP_PID=$!
@@ -328,7 +328,7 @@ parse_args() {
                 echo "  --only-web              Test only with web mode enabled"
                 echo "  --no-web                Test only with web mode disabled"
                 echo "  --flood                 Flood mode - run curl requests in background without waiting"
-                echo "  --storage FORMATS      Storage formats to test: 'jsonl', 'sqlite', or 'jsonl sqlite' (default: jsonl)"
+                echo "  --storage FORMATS      Storage formats to test: 'jsonl', 'sqlite', 'protobuf', or combinations (default: jsonl)"
                 echo "  --no-plot               Skip plot generation after tests"
                 echo "  -h, --help              Show this help message"
                 echo ""
@@ -339,7 +339,7 @@ parse_args() {
                 echo "  $0 --only-web                        # Test only with web mode enabled"
                 echo "  $0 --no-web                          # Test only with web mode disabled"
                 echo "  $0 --flood -n 50000                  # Flood mode with 50000 concurrent requests"
-                echo "  $0 --storage 'jsonl sqlite'          # Test both storage formats"
+                echo "  $0 --storage 'jsonl sqlite protobuf' # Test all storage formats"
                 echo "  $0 -n 5000 --no-plot                 # 5000 requests, no plotting"
                 exit 0
                 ;;
