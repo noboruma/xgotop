@@ -304,6 +304,10 @@ func main() {
 	// probeDurationNsSum.Store(0)
 	// probeDurationNsCount.Store(0)
 
+	// Processing time metrics
+	var processingTimeNsSum atomic.Int64
+	var processingTimeNsCount atomic.Int64
+
 	readersStopped := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	var readWg, processWg sync.WaitGroup
@@ -316,6 +320,7 @@ func main() {
 	metricPPS := make([]float64, 0, 1_000)
 	metricEWP := make([]float64, 0, 1_000)
 	metricLAT := make([]float64, 0, 1_000)
+	metricPRC := make([]float64, 0, 1_000)
 	metricTimestamps := make([]float64, 0, 1_000)
 
 	// Monitor for stop signals and close the ringbuffer reader to unblock all readers
@@ -371,16 +376,30 @@ func main() {
 						prog = *binaryPath
 					}
 
-					log.Printf("[Stats] LAT: %d (%.2f%% of %v)\n\n", latAvg, latPerc, prog)
+					log.Printf("[Stats] LAT: %d (%.2f%% of %v)", latAvg, latPerc, prog)
 				} else {
-					log.Printf("[Stats] LAT: NaN\n\n")
+					log.Printf("[Stats] LAT: NaN")
 					lat = 0
+				}
+
+				// Processing time stats
+				var procTime float64
+				procCnt := processingTimeNsCount.Load()
+				if procCnt != 0 {
+					procSum := processingTimeNsSum.Load()
+					procAvg := procSum / procCnt
+					procTime = float64(procAvg)
+					log.Printf("[Stats] PRC: %d ns/event\n\n", procAvg)
+				} else {
+					log.Printf("[Stats] PRC: NaN\n\n")
+					procTime = 0
 				}
 
 				metricRPS = append(metricRPS, rps)
 				metricPPS = append(metricPPS, pps)
 				metricEWP = append(metricEWP, float64(ec))
 				metricLAT = append(metricLAT, lat)
+				metricPRC = append(metricPRC, procTime)
 				metricTimestamps = append(metricTimestamps, float64(time.Now().UTC().UnixNano()))
 			}
 		}
@@ -430,7 +449,11 @@ func main() {
 						procEventCount.Add(1)
 						probeDurationNsCount.Add(1)
 						probeDurationNsSum.Add(int64(event.ProbeDurationNs))
+						processStart := time.Now()
 						processEvent(i, event)
+						processDuration := time.Since(processStart).Nanoseconds()
+						processingTimeNsSum.Add(processDuration)
+						processingTimeNsCount.Add(1)
 						updateEventCounts(&eventCountsByType, event)
 					}
 					log.Printf("[PW-%d] Draining events channel complete", i)
@@ -444,7 +467,11 @@ func main() {
 					procEventCount.Add(1)
 					probeDurationNsCount.Add(1)
 					probeDurationNsSum.Add(int64(event.ProbeDurationNs))
+					processStart := time.Now()
 					processEvent(i, event)
+					processDuration := time.Since(processStart).Nanoseconds()
+					processingTimeNsSum.Add(processDuration)
+					processingTimeNsCount.Add(1)
 					updateEventCounts(&eventCountsByType, event)
 				}
 			}
@@ -467,6 +494,7 @@ func main() {
 		Pps         []float64      `json:"pps"`
 		Ewp         []float64      `json:"ewp"`
 		Lat         []float64      `json:"lat"`
+		Prc         []float64      `json:"prc"`
 		Ts          []float64      `json:"ts"`
 		EventCounts map[int]uint64 `json:"event_counts"`
 	}{
@@ -474,6 +502,7 @@ func main() {
 		Pps: metricPPS,
 		Ewp: metricEWP,
 		Lat: metricLAT,
+		Prc: metricPRC,
 		Ts:  metricTimestamps,
 		EventCounts: map[int]uint64{
 			0: eventCountsByType.casGStatus.Load(),
