@@ -38,6 +38,7 @@ export interface GoroutineState {
   newobjects: NewObjectEvent[];
   createdAt: number;
   exitedAt?: number;
+  exitedAtRealTime?: number; // Real time (Date.now()) when goroutine exited
 }
 
 export interface StateEvent {

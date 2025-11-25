@@ -1,4 +1,4 @@
-all: gen compile run-silent
+all: gen compile run
 .PHONY: all 
 
 vmlinux:
@@ -12,37 +12,32 @@ compile: gen
 	go build -o goroutinepadding ./cmd/goroutinepadding
 	go build -o xgotop ./cmd/xgotop
 
-samplingtest: gen compile
+samplingtest: compile
 	./scripts/test_sampling.sh
 
-weboverheadtest: gen compile
-	./scripts/test_web_overhead.sh -r "1 2 4 8 16 32 64 128" -p "1" --storage "jsonl sqlite" --only-web --flood -n 50000
+weboverheadtest: compile
+	./scripts/test_web_overhead.sh -r "1 2 4 8 16 32 64 128" -p "1" --storage "jsonl protobuf" --flood -n 20000
 
-run:
-	sudo ./xgotop -b ./testserver -rw 1 -pw 1
+buffertest: compile
+	./scripts/test_web_overhead.sh -r "1" -p "1" --storage "jsonl protobuf" --only-web --batch-sizes "500 1000 2000 4000 8000 16000 32000 64000" --flood -n 20000
 
-run-silent:
-	sudo ./xgotop -b ./testserver -rw 1 -pw 1 -s
+run: compile
+	sudo ./xgotop -b ./testserver -rw 8 -pw 1 -batch-size 32000 -sample "casgstatus:0.1"
 
-# TODO: This date call is not working in the Makefile, fix it.
-# runlog:
-# 	sudo ./xgotop -b ./testserver -rw 3 -pw 5 2>&1 | tee "xgotop_$(date +%Y-%m-%d-%H-%M-%S).log"
+run-silent: compile
+	sudo ./xgotop -b ./testserver -rw 8 -pw 1 -batch-size 32000 -sample "casgstatus:0.1" -s
 
-# Web targets
 web-install:
 	cd web && npm install
 
-web-dev:
+web-dev: web-install
 	cd web && npm run dev
 
-web-build:
+web-build: web-install
 	cd web && npm run build
 
-xgotop-web:
-	go build -o xgotop ./cmd/xgotop
-
-run-web:
-	sudo ./xgotop -b ./testserver -rw 1 -pw 1 -web -web-port 8080 -storage-format binary -storage-dir ./sessions
+run-web: compile
+	sudo ./xgotop -b ./testserver -rw 8 -pw 1 -batch-size 100 -web -web-port 8080 -storage-format protobuf -storage-dir ./sessions
 
 clean:
 	- rm ebpf_arm64*.go

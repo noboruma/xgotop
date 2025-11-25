@@ -367,22 +367,22 @@ def create_individual_file_plot(data, label, output_path, palette_name='vibrant'
     has_ewp = 'ewp' in data
     has_lat = 'lat' in data
     has_prc = 'prc' in data
-    has_bsz = 'bsz' in data
     has_bps = 'bps' in data
     has_bfl = 'bfl' in data
+    has_qwl = 'qwl' in data
 
     # Determine layout based on available data
     # Row 1: RPS vs PPS and Event Counts (if available)
     # Row 2: EWP, Latency, Processing Time (if available)
-    # Row 3: BSZ, BPS, BFL (if available)
-    n_rows = 3 if any([has_bsz, has_bps, has_bfl]) else 2
+    # Row 3: BPS, BFL, QWL (if available)
+    n_rows = 3 if any([has_bps, has_bfl, has_qwl]) else 2
 
     # For top row: max 2 columns (RPS/PPS and Event Counts)
     top_row_cols = 2 if has_event_counts else 1
     # For middle row: count of available metrics
     middle_row_cols = sum([has_ewp, has_lat, has_prc])
-    # For bottom row: count of available batch metrics
-    bottom_row_cols = sum([has_bsz, has_bps, has_bfl])
+    # For bottom row: count of available batch/queue metrics
+    bottom_row_cols = sum([has_bps, has_bfl, has_qwl])
     n_cols = max(top_row_cols, middle_row_cols, bottom_row_cols)
 
     # Better figure size to prevent squished plots - double the width
@@ -592,7 +592,17 @@ def create_individual_file_plot(data, label, output_path, palette_name='vibrant'
         x_values = get_time_values(len(data['ewp']))
         ewp_values = np.array(data['ewp'])
 
-        # Main plot (no shadow in aggregate)
+        # Add shadows for individual plot
+        shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
+        shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
+        x_offset = len(x_values) * 0.003
+        y_offset_ewp = (max(ewp_values) - min(ewp_values)) * 0.01 if len(ewp_values) > 0 else 0
+
+        # Plot shadow
+        ax_ewp.plot(x_values + x_offset, ewp_values - y_offset_ewp,
+                   color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
+
+        # Main plot
         ax_ewp.plot(x_values, ewp_values,
                    color=COLORS['quaternary'], linewidth=4, zorder=2)
 
@@ -645,7 +655,17 @@ def create_individual_file_plot(data, label, output_path, palette_name='vibrant'
         # Values are already in nanoseconds
         lat_values = np.array(data['lat'])
 
-        # Main plot (no shadow in aggregate)
+        # Add shadows for individual plot
+        shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
+        shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
+        x_offset = len(x_values) * 0.003
+        y_offset_lat = (max(lat_values) - min(lat_values)) * 0.01 if len(lat_values) > 0 else 0
+
+        # Plot shadow
+        ax_lat.plot(x_values + x_offset, lat_values - y_offset_lat,
+                   color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
+
+        # Main plot
         ax_lat.plot(x_values, lat_values,
                    color=COLORS.get('septenary', '#FF1744'), linewidth=4, zorder=2)
 
@@ -697,7 +717,17 @@ def create_individual_file_plot(data, label, output_path, palette_name='vibrant'
         x_values = get_time_values(len(data['prc']))
         prc_values = np.array(data['prc'])
 
-        # Main plot (no shadow in aggregate)
+        # Add shadows for individual plot
+        shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
+        shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
+        x_offset = len(x_values) * 0.003
+        y_offset_prc = (max(prc_values) - min(prc_values)) * 0.01 if len(prc_values) > 0 else 0
+
+        # Plot shadow
+        ax_prc.plot(x_values + x_offset, prc_values - y_offset_prc,
+                   color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
+
+        # Main plot
         ax_prc.plot(x_values, prc_values,
                    color=COLORS.get('octonary', '#00E676'), linewidth=4, zorder=2)
 
@@ -746,43 +776,6 @@ def create_individual_file_plot(data, label, output_path, palette_name='vibrant'
     if n_rows > 2:
         batch_plot_idx = 0
 
-        # Plot BSZ (Batch Size)
-        if has_bsz:
-            ax_bsz = fig.add_subplot(gs[2, batch_plot_idx])
-            batch_plot_idx += 1
-
-            x_values = get_time_values(len(data['bsz']))
-            bsz_values = np.array(data['bsz'])
-
-            # Main plot (no shadow in aggregate)
-            ax_bsz.plot(x_values, bsz_values,
-                       color=COLORS.get('primary', '#FF6B6B'), linewidth=4, zorder=2)
-
-            # Fill under the curve
-            ax_bsz.fill_between(x_values, 0, bsz_values,
-                               alpha=0.3, color=COLORS.get('primary', '#FF6B6B'), zorder=1)
-
-            ax_bsz.set_title('BATCH SIZE (events/batch)',
-                            fontsize=14, weight='black', pad=10, color=COLORS['text'])
-            ax_bsz.set_xlabel('TIME (seconds)', fontsize=10, weight='bold', color=COLORS['text'])
-            ax_bsz.set_ylabel('EVENTS', fontsize=10, weight='bold', color=COLORS['text'])
-            ax_bsz.tick_params(colors=COLORS['text'], which='both')
-            ax_bsz.grid(True, alpha=0.3, color=COLORS['text'], linewidth=1, linestyle='--')
-
-            # Add stats annotation
-            avg_bsz = np.mean(bsz_values)
-            max_bsz = np.max(bsz_values)
-            min_bsz = np.min(bsz_values)
-            ax_bsz.text(0.02, 0.98, f'AVG: {avg_bsz:.1f}\nMIN: {min_bsz:.1f}\nMAX: {max_bsz:.1f}',
-                       transform=ax_bsz.transAxes,
-                       fontsize=10, weight='bold',
-                       verticalalignment='top',
-                       bbox=dict(boxstyle='round,pad=0.5',
-                                facecolor='white', alpha=0.8,
-                                edgecolor=COLORS.get('primary', '#FF6B6B'), linewidth=2))
-
-            for spine in ax_bsz.spines.values():
-                spine.set_linewidth(4)
 
         # Plot BPS (Batches Per Second)
         if has_bps:
@@ -792,7 +785,17 @@ def create_individual_file_plot(data, label, output_path, palette_name='vibrant'
             x_values = get_time_values(len(data['bps']))
             bps_values = np.array(data['bps'])
 
-            # Main plot (no shadow in aggregate)
+            # Add shadows for individual plot
+            shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
+            shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
+            x_offset = len(x_values) * 0.003
+            y_offset_bps = (max(bps_values) - min(bps_values)) * 0.01 if len(bps_values) > 0 else 0
+
+            # Plot shadow
+            ax_bps.plot(x_values + x_offset, bps_values - y_offset_bps,
+                       color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
+
+            # Main plot
             ax_bps.plot(x_values, bps_values,
                        color=COLORS.get('secondary', '#4ECDC4'), linewidth=4, zorder=2)
 
@@ -825,11 +828,22 @@ def create_individual_file_plot(data, label, output_path, palette_name='vibrant'
         # Plot BFL (Batch Flush Latency)
         if has_bfl:
             ax_bfl = fig.add_subplot(gs[2, batch_plot_idx])
+            batch_plot_idx += 1
 
             x_values = get_time_values(len(data['bfl']))
-            bfl_values = np.array(data['bfl'])
+            bfl_values = np.array(data['bfl']) / 1e6  # Convert nanoseconds to milliseconds
 
-            # Main plot (no shadow in aggregate)
+            # Add shadows for individual plot
+            shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
+            shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
+            x_offset = len(x_values) * 0.003
+            y_offset_bfl = (max(bfl_values) - min(bfl_values)) * 0.01 if len(bfl_values) > 0 else 0
+
+            # Plot shadow
+            ax_bfl.plot(x_values + x_offset, bfl_values - y_offset_bfl,
+                       color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
+
+            # Main plot
             ax_bfl.plot(x_values, bfl_values,
                        color=COLORS.get('tertiary', '#FFD93D'), linewidth=4, zorder=2)
 
@@ -837,10 +851,10 @@ def create_individual_file_plot(data, label, output_path, palette_name='vibrant'
             ax_bfl.fill_between(x_values, 0, bfl_values,
                                alpha=0.3, color=COLORS.get('tertiary', '#FFD93D'), zorder=1)
 
-            ax_bfl.set_title('BATCH FLUSH LATENCY (ns/batch)',
+            ax_bfl.set_title('BATCH FLUSH LATENCY (ms/batch)',
                             fontsize=14, weight='black', pad=10, color=COLORS['text'])
             ax_bfl.set_xlabel('TIME (seconds)', fontsize=10, weight='bold', color=COLORS['text'])
-            ax_bfl.set_ylabel('NANOSECONDS', fontsize=10, weight='bold', color=COLORS['text'])
+            ax_bfl.set_ylabel('MILLISECONDS', fontsize=10, weight='bold', color=COLORS['text'])
             ax_bfl.tick_params(colors=COLORS['text'], which='both')
             ax_bfl.grid(True, alpha=0.3, color=COLORS['text'], linewidth=1, linestyle='--')
 
@@ -848,7 +862,7 @@ def create_individual_file_plot(data, label, output_path, palette_name='vibrant'
             avg_bfl = np.mean(bfl_values)
             max_bfl = np.max(bfl_values)
             min_bfl = np.min(bfl_values)
-            ax_bfl.text(0.02, 0.98, f'AVG: {avg_bfl:.1f} ns\nMIN: {min_bfl:.1f} ns\nMAX: {max_bfl:.1f} ns',
+            ax_bfl.text(0.02, 0.98, f'AVG: {avg_bfl:.3f} ms\nMIN: {min_bfl:.3f} ms\nMAX: {max_bfl:.3f} ms',
                        transform=ax_bfl.transAxes,
                        fontsize=10, weight='bold',
                        verticalalignment='top',
@@ -857,6 +871,53 @@ def create_individual_file_plot(data, label, output_path, palette_name='vibrant'
                                 edgecolor=COLORS.get('tertiary', '#FFD93D'), linewidth=2))
 
             for spine in ax_bfl.spines.values():
+                spine.set_linewidth(4)
+
+        # Plot QWL (Queue Wait Latency)
+        if has_qwl:
+            ax_qwl = fig.add_subplot(gs[2, batch_plot_idx])
+
+            x_values = get_time_values(len(data['qwl']))
+            qwl_values = np.array(data['qwl']) / 1e6  # Convert nanoseconds to milliseconds
+
+            # Add shadows for individual plot
+            shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
+            shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
+            x_offset = len(x_values) * 0.003
+            y_offset_qwl = (max(qwl_values) - min(qwl_values)) * 0.01 if len(qwl_values) > 0 else 0
+
+            # Plot shadow
+            ax_qwl.plot(x_values + x_offset, qwl_values - y_offset_qwl,
+                       color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
+
+            # Main plot
+            ax_qwl.plot(x_values, qwl_values,
+                       color=COLORS.get('error', '#FF4444'), linewidth=4, zorder=2)
+
+            # Fill under the curve
+            ax_qwl.fill_between(x_values, 0, qwl_values,
+                               alpha=0.3, color=COLORS.get('error', '#FF4444'), zorder=1)
+
+            ax_qwl.set_title('QUEUE WAIT LATENCY (ms/event)',
+                            fontsize=14, weight='black', pad=10, color=COLORS['text'])
+            ax_qwl.set_xlabel('TIME (seconds)', fontsize=10, weight='bold', color=COLORS['text'])
+            ax_qwl.set_ylabel('MILLISECONDS', fontsize=10, weight='bold', color=COLORS['text'])
+            ax_qwl.tick_params(colors=COLORS['text'], which='both')
+            ax_qwl.grid(True, alpha=0.3, color=COLORS['text'], linewidth=1, linestyle='--')
+
+            # Add stats annotation
+            avg_qwl = np.mean(qwl_values)
+            max_qwl = np.max(qwl_values)
+            min_qwl = np.min(qwl_values)
+            ax_qwl.text(0.02, 0.98, f'AVG: {avg_qwl:.3f} ms\nMIN: {min_qwl:.3f} ms\nMAX: {max_qwl:.3f} ms',
+                       transform=ax_qwl.transAxes,
+                       fontsize=10, weight='bold',
+                       verticalalignment='top',
+                       bbox=dict(boxstyle='round,pad=0.5',
+                                facecolor='white', alpha=0.8,
+                                edgecolor=COLORS.get('error', '#FF4444'), linewidth=2))
+
+            for spine in ax_qwl.spines.values():
                 spine.set_linewidth(4)
 
     # GridSpec handles all layout now, no need for additional adjustment
@@ -926,16 +987,7 @@ def create_aggregate_metrics_plot(metrics_data, labels, output_path, palette_nam
                 x_values = np.arange(len(data['ewp']))
                 ewp_values = np.array(data['ewp'])
 
-                # Shadow
-                shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
-                shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
-                x_offset = len(x_values) * 0.003
-                y_offset = max(1, (max(ewp_values) - min(ewp_values)) * 0.01) if len(ewp_values) > 0 else 1
-
-                ax.plot(x_values + x_offset, ewp_values - y_offset, linestyle,
-                       color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
-
-                # Main plot
+                # Main plot (no shadow in aggregate)
                 ax.plot(x_values, ewp_values, linestyle,
                        color=color, linewidth=4, label=label, zorder=2)
 
@@ -1016,16 +1068,7 @@ def create_aggregate_metrics_plot(metrics_data, labels, output_path, palette_nam
                 # Values are already in nanoseconds
                 lat_values = np.array(data['lat'])
 
-                # Shadow
-                shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
-                shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
-                x_offset = len(x_values) * 0.003
-                y_offset = (max(lat_values) - min(lat_values)) * 0.01 if len(lat_values) > 0 else 0
-
-                ax.plot(x_values + x_offset, lat_values - y_offset, linestyle,
-                       color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
-
-                # Main plot
+                # Main plot (no shadow in aggregate)
                 ax.plot(x_values, lat_values, linestyle,
                        color=color, linewidth=4, label=label, zorder=2)
 
@@ -1087,19 +1130,7 @@ def create_aggregate_metrics_plot(metrics_data, labels, output_path, palette_nam
                 x_values = np.arange(len(data['prc']))
                 prc_values = np.array(data['prc'])
 
-                # Shadow
-                shadow_color = 'white' if palette_name == 'cyberpunk' else 'black'
-                shadow_alpha = 0.2 if palette_name == 'cyberpunk' else 0.3
-                x_offset = len(x_values) * 0.003
-                if len(prc_values) > 0 and prc_values.max() > prc_values.min():
-                    y_offset = (prc_values.max() - prc_values.min()) * 0.01
-                else:
-                    y_offset = 1
-
-                ax.plot(x_values + x_offset, prc_values - y_offset, linestyle,
-                       color=shadow_color, linewidth=5, alpha=shadow_alpha, zorder=1)
-
-                # Main plot
+                # Main plot (no shadow in aggregate)
                 ax.plot(x_values, prc_values, linestyle,
                        color=color, linewidth=4, label=label, zorder=2)
 

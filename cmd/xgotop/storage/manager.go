@@ -78,9 +78,6 @@ func (m *Manager) OpenSession(ctx context.Context, id string) (EventStore, error
 	if _, err := os.Stat(filepath.Join(sessionDir, "events.jsonl")); err == nil {
 		return OpenJSONLStore(m.baseDir, id)
 	}
-	if _, err := os.Stat(filepath.Join(sessionDir, "events.db")); err == nil {
-		return OpenSQLiteStore(m.baseDir, id)
-	}
 
 	return nil, fmt.Errorf("no event store found for session %s", id)
 }
@@ -105,12 +102,10 @@ func (m *Manager) CreateSession(ctx context.Context, session *Session, format st
 	switch format {
 	case "jsonl", "json":
 		return NewJSONLStore(m.baseDir, session)
-	case "sqlite", "sql", "db":
-		return NewSQLiteStore(m.baseDir, session)
 	case "protobuf", "pb", "proto":
 		return NewProtobufStore(m.baseDir, session)
 	default:
-		return nil, fmt.Errorf("unknown format: %s (supported: jsonl, sqlite, protobuf)", format)
+		return nil, fmt.Errorf("unknown format: %s (supported: jsonl, protobuf)", format)
 	}
 }
 

@@ -31,8 +31,18 @@ export class WebSocketClient {
           // Handle multiple events in one message (separated by newlines)
           const messages = event.data.split('\n').filter((msg: string) => msg.trim());
           for (const message of messages) {
-            const parsedEvent: Event = JSON.parse(message);
-            this.callbacks.forEach(callback => callback(parsedEvent));
+            const parsed = JSON.parse(message);
+
+            // Check if this is a batch message
+            if (parsed.type === 'batch' && Array.isArray(parsed.events)) {
+              // Handle batch of events
+              for (const evt of parsed.events) {
+                this.callbacks.forEach(callback => callback(evt));
+              }
+            } else {
+              // Handle single event
+              this.callbacks.forEach(callback => callback(parsed));
+            }
           }
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);

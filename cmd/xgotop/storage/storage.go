@@ -2,7 +2,11 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -89,4 +93,34 @@ type SessionStore interface {
 	DeleteSession(ctx context.Context, id string) error
 
 	io.Closer
+}
+
+// Helper functions for session metadata
+func saveSessionMetadata(sessionDir string, session *Session) error {
+	metadataPath := filepath.Join(sessionDir, "metadata.json")
+	data, err := json.MarshalIndent(session, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal session metadata: %w", err)
+	}
+
+	if err := os.WriteFile(metadataPath, data, 0644); err != nil {
+		return fmt.Errorf("write session metadata: %w", err)
+	}
+
+	return nil
+}
+
+func loadSessionMetadata(sessionDir string) (*Session, error) {
+	metadataPath := filepath.Join(sessionDir, "metadata.json")
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return nil, fmt.Errorf("read session metadata: %w", err)
+	}
+
+	var session Session
+	if err := json.Unmarshal(data, &session); err != nil {
+		return nil, fmt.Errorf("unmarshal session metadata: %w", err)
+	}
+
+	return &session, nil
 }

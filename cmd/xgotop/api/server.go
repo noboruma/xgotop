@@ -19,6 +19,17 @@ type Config struct {
 	TypeColors          map[string]string `json:"type_colors"`
 }
 
+// Metrics represents the real-time performance metrics
+type Metrics struct {
+	RPS float64 `json:"rps"` // Read events per second
+	PPS float64 `json:"pps"` // Processed events per second
+	EWP int64   `json:"ewp"` // Events waiting processing
+	LAT float64 `json:"lat"` // Average latency in nanoseconds
+	PRC int64   `json:"prc"` // Processing time in nanoseconds
+	BFL float64 `json:"bfl"` // Batch flush latency
+	QWL float64 `json:"qwl"` // Queue wait latency
+}
+
 // Server is the HTTP API server
 type Server struct {
 	manager    *storage.Manager
@@ -26,12 +37,15 @@ type Server struct {
 	configMu   sync.RWMutex
 	hub        *Hub
 	httpServer *http.Server
+	metrics    *Metrics
+	metricsMu  sync.RWMutex
 }
 
 // NewServer creates a new API server
 func NewServer(manager *storage.Manager, port int) *Server {
 	server := &Server{
 		manager: manager,
+		metrics: &Metrics{},
 		config: &Config{
 			NanosecondsPerPixel: 1000000.0, // 1ms per pixel by default
 			StateColors: map[string]string{
@@ -61,6 +75,7 @@ func NewServer(manager *storage.Manager, port int) *Server {
 	mux.HandleFunc("/api/sessions", server.handleSessions)
 	mux.HandleFunc("/api/sessions/", server.handleSession)
 	mux.HandleFunc("/api/config", server.handleConfig)
+	mux.HandleFunc("/api/metrics", server.handleMetrics)
 
 	// WebSocket endpoint
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
@@ -280,6 +295,28 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// UpdateMetrics updates the server's metrics
+func (s *Server) UpdateMetrics(metrics *Metrics) {
+	s.metricsMu.Lock()
+	s.metrics = metrics
+	s.metricsMu.Unlock()
+}
+
+// handleMetrics handles the /api/metrics endpoint
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	s.metricsMu.RLock()
+	metrics := s.metrics
+	s.metricsMu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(metrics)
 }
 
 func corsMiddleware(next http.Handler) http.Handler {

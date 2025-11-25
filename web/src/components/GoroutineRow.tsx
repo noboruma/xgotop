@@ -2,9 +2,11 @@ import type { GoroutineState } from '../types/event';
 import { StateBox } from './StateBox';
 import { AllocBox } from './AllocBox';
 import { useConfigStore } from '../store/configStore';
+import { useEventStore } from '../store/eventStore';
 
 interface GoroutineRowProps {
   goroutine: GoroutineState;
+  onClick?: () => void;
 }
 
 const KIND_NAMES: Record<number, string> = {
@@ -15,8 +17,18 @@ const KIND_NAMES: Record<number, string> = {
   23: 'Slice', 24: 'String', 25: 'Struct', 26: 'UnsafePtr',
 };
 
-export function GoroutineRow({ goroutine }: GoroutineRowProps) {
-  const { nanoseconds_per_pixel } = useConfigStore();
+// Abbreviated type names for small boxes
+const KIND_ABBR: Record<number, string> = {
+  0: '?', 1: 'b', 2: 'i', 3: 'i8', 4: 'i16', 5: 'i32', 6: 'i64',
+  7: 'u', 8: 'u8', 9: 'u16', 10: 'u32', 11: 'u64', 12: 'uptr',
+  13: 'f32', 14: 'f64', 15: 'c64', 16: 'c128',
+  17: 'A', 18: 'C', 19: 'F', 20: 'I', 21: 'M', 22: 'P',
+  23: 'S', 24: 'str', 25: 'st', 26: 'UP',
+};
+
+export function GoroutineRow({ goroutine, onClick }: GoroutineRowProps) {
+  const { nanoseconds_per_pixel, boxHeights } = useConfigStore();
+  const { viewport } = useEventStore();
   
   return (
     <div className="border-b-3 border-black bg-background">
@@ -38,28 +50,28 @@ export function GoroutineRow({ goroutine }: GoroutineRowProps) {
       </div>
       
       {/* States row */}
-      <div className="relative h-10 border-b-2 border-black overflow-hidden">
+      <div className={`relative ${boxHeights.states} border-b-2 border-black overflow-hidden`}>
         <div className="absolute left-0 top-1 right-0 bottom-1">
           {goroutine.states.map((state, idx) => (
             <StateBox
               key={idx}
               state={state}
               nextState={goroutine.states[idx + 1]}
-              startTime={goroutine.createdAt}
+              onClick={onClick}
             />
           ))}
         </div>
       </div>
       
       {/* Allocations row */}
-      <div className="relative h-8 border-b-2 border-black overflow-hidden">
+      <div className={`relative ${boxHeights.allocations} border-b-2 border-black overflow-hidden`}>
         <div className="absolute left-0 top-1 right-0 bottom-1">
           {goroutine.allocations.map((alloc, idx) => (
             <AllocBox
               key={idx}
               alloc={alloc}
               nextAlloc={goroutine.allocations[idx + 1]}
-              startTime={goroutine.createdAt}
+              onClick={onClick}
             />
           ))}
         </div>
@@ -67,19 +79,43 @@ export function GoroutineRow({ goroutine }: GoroutineRowProps) {
       
       {/* NewObject sub-row */}
       {goroutine.newobjects.length > 0 && (
-        <div className="relative h-6 border-b-2 border-black bg-gray-50 overflow-hidden">
+        <div className={`relative ${boxHeights.newobjects} border-b-2 border-black bg-gray-50 overflow-hidden`}>
           <div className="absolute left-0 top-0.5 right-0 bottom-0.5">
             {goroutine.newobjects.map((obj, idx) => {
-              const left = (obj.timestamp - goroutine.createdAt) / nanoseconds_per_pixel;
+              // Apply zoom to position relative to viewport start
+              const left = ((obj.timestamp - viewport.timeStart) / nanoseconds_per_pixel) * viewport.zoom;
+
+              // Calculate width with zoom - use size as a rough indicator
+              const width = Math.max((obj.size / 1000) * viewport.zoom, 10);
+
               const kindName = KIND_NAMES[obj.kind] || `Kind ${obj.kind}`;
+              const kindAbbr = KIND_ABBR[obj.kind] || obj.kind.toString();
+
+              // Choose display based on width
+              let displayText;
+              if (width < 20) {
+                displayText = '•';
+              } else if (width < 40) {
+                displayText = kindAbbr;
+              } else if (width < 60) {
+                displayText = `${obj.size}`;
+              } else {
+                displayText = `${obj.size}B ${kindName}`;
+              }
+
               return (
                 <div
                   key={idx}
-                  className="absolute h-5 min-w-[12px] border-2 border-black bg-cyan-400 flex items-center justify-center text-[9px] font-mono font-bold overflow-hidden"
-                  style={{ left: `${left}px`, width: `${Math.max(obj.size / 1000, 12)}px` }}
-                  title={`newobject\nSize: ${obj.size} bytes\nKind: ${kindName}`}
+                  className="absolute h-5 border-2 border-black bg-cyan-400 flex items-center justify-center text-[9px] font-mono font-bold overflow-hidden cursor-pointer hover:brightness-110"
+                  style={{
+                    left: `${left}px`,
+                    width: `${width}px`,
+                    minWidth: '10px'
+                  }}
+                  title={`NewObject\nType: ${kindName}\nSize: ${obj.size} bytes\nTimestamp: ${(obj.timestamp / 1000000).toFixed(2)}ms`}
+                  onClick={onClick}
                 >
-                  {obj.size > 100 ? `${obj.size}B` : '•'}
+                  <span className="truncate px-0.5">{displayText}</span>
                 </div>
               );
             })}

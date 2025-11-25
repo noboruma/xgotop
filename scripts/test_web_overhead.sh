@@ -45,7 +45,8 @@ READERS_RANGE="1 2 3 4 5"
 PROCESSORS_RANGE="1 2 3 4 5"
 WEB_MODES="0 1"  # By default test both modes
 FLOOD_MODE=false  # Default to normal mode (wait for responses)
-STORAGE_FORMATS="jsonl"  # Default storage formats to test (can be "jsonl sqlite protobuf" for all)
+STORAGE_FORMATS="jsonl"  # Default storage formats to test (can be "jsonl protobuf" for all)
+BATCH_SIZES=""  # Default empty (uses xgotop default of 1000), can be "100 500 1000 2000" for testing
 
 # Print colored message
 print_msg() {
@@ -70,10 +71,21 @@ run_test() {
     local processors_count=$2
     local web_mode=$3
     local storage_format=$4
+    local batch_size=$5
+
+    # Build metrics file prefix
     local metrics_file_prefix="readers_${readers_count}_processors_${processors_count}_web_${web_mode}_${storage_format}"
+    if [ ! -z "$batch_size" ]; then
+        metrics_file_prefix="${metrics_file_prefix}_batch_${batch_size}"
+    fi
     local output_prefix="${OUTPUT_DIR}/${metrics_file_prefix}"
 
-    print_msg "$YELLOW" "\n=== Running test: $readers_count readers, $processors_count processors, web mode $web_mode, storage $storage_format ==="
+    # Build test description
+    local test_desc="$readers_count readers, $processors_count processors, web mode $web_mode, storage $storage_format"
+    if [ ! -z "$batch_size" ]; then
+        test_desc="$test_desc, batch size $batch_size"
+    fi
+    print_msg "$YELLOW" "\n=== Running test: $test_desc ==="
 
     # Enable cleanup on interrupt from this point
     SHOULD_CLEANUP=true
@@ -81,7 +93,7 @@ run_test() {
     # Kill any existing processes
     sudo pkill -f "$TESTSERVER_BIN" 2>/dev/null || true
     sudo pkill -f "xgotop" 2>/dev/null || true
-    sleep 2
+    sleep 1
     
     # Start testserver first
     print_msg "$GREEN" "Starting testserver..."
@@ -89,7 +101,7 @@ run_test() {
     TESTSERVER_PID=$!
     
     # Give testserver time to start
-    sleep 2
+    sleep 1
     
     # Check if testserver is running
     if ! kill -0 $TESTSERVER_PID 2>/dev/null; then
@@ -106,18 +118,32 @@ run_test() {
     fi
     print_msg "$GREEN" "Testserver is ready!"
         
+    # Build batch size parameter
+    local batch_param=""
+    if [ ! -z "$batch_size" ]; then
+        batch_param="-batch-size $batch_size"
+    fi
+
     if [ $web_mode -eq 1 ]; then
-        print_msg "$GREEN" "Starting xgotop with web mode, $readers_count readers, $processors_count processors, storage: $storage_format"
-        sudo $XGOTOP_BIN -b $TESTSERVER_BIN -s -web -storage-format "$storage_format" -rw $readers_count -pw $processors_count -mfp "${metrics_file_prefix}" &
+        local desc_msg="Starting xgotop with web mode, $readers_count readers, $processors_count processors, storage: $storage_format"
+        if [ ! -z "$batch_size" ]; then
+            desc_msg="$desc_msg, batch size: $batch_size"
+        fi
+        print_msg "$GREEN" "$desc_msg"
+        sudo $XGOTOP_BIN -b $TESTSERVER_BIN -s -web -storage-format "$storage_format" -rw $readers_count -pw $processors_count -mfp "${metrics_file_prefix}" $batch_param &
     else
-        print_msg "$GREEN" "Starting xgotop with no web mode, $readers_count readers, $processors_count processors, storage: $storage_format"
-        sudo $XGOTOP_BIN -b $TESTSERVER_BIN -s -storage-format "$storage_format" -rw $readers_count -pw $processors_count -mfp "${metrics_file_prefix}" &
+        local desc_msg="Starting xgotop with no web mode, $readers_count readers, $processors_count processors, storage: $storage_format"
+        if [ ! -z "$batch_size" ]; then
+            desc_msg="$desc_msg, batch size: $batch_size"
+        fi
+        print_msg "$GREEN" "$desc_msg"
+        sudo $XGOTOP_BIN -b $TESTSERVER_BIN -s -storage-format "$storage_format" -rw $readers_count -pw $processors_count -mfp "${metrics_file_prefix}" $batch_param &
     fi
     
     XGOTOP_PID=$!
     
     # Give xgotop time to initialize
-    sleep 2
+    sleep 1
     
     # Check if xgotop is still running
     if ! kill -0 $XGOTOP_PID 2>/dev/null; then
@@ -173,7 +199,7 @@ run_test() {
             done
         fi
 
-        sleep 2
+        sleep 1
     else
         print_msg "$GREEN" "Starting curl loop for $TEST_REQUESTS requests..."
         for i in $(seq 1 $TEST_REQUESTS); do
@@ -184,9 +210,6 @@ run_test() {
         sleep 3
         print_msg "$GREEN" "All requests completed!"
     fi
-    
-    # Wait for testserver to process all requests
-    sleep 10
 
     # Kill testserver (we already have its PID)
     print_msg "$YELLOW" "Stopping testserver..."
@@ -198,9 +221,6 @@ run_test() {
             sudo kill -9 $TESTSERVER_PID 2>/dev/null || true
         fi
     fi
-    
-    # Give xgotop time to process remaining events
-    sleep 2
     
     # Stop xgotop
     print_msg "$YELLOW" "Stopping xgotop..."
@@ -247,10 +267,22 @@ generate_plots() {
         for p in $PROCESSORS_RANGE; do
             for w in $WEB_MODES; do
                 for s in $STORAGE_FORMATS; do
-                    local label="r${r}_p${p}_w${w}_${s}"
-                    local file_path="${OUTPUT_DIR}/readers_${r}_processors_${p}_web_${w}_${s}_metrics.json"
-                    if [ -f "$file_path" ]; then
-                        files_args="${files_args} '${label}:${file_path}'"
+                    # If batch sizes are specified, include them in the search
+                    if [ ! -z "$BATCH_SIZES" ]; then
+                        for b in $BATCH_SIZES; do
+                            local label="r${r}_p${p}_w${w}_${s}_b${b}"
+                            local file_path="${OUTPUT_DIR}/readers_${r}_processors_${p}_web_${w}_${s}_batch_${b}_metrics.json"
+                            if [ -f "$file_path" ]; then
+                                files_args="${files_args} '${label}:${file_path}'"
+                            fi
+                        done
+                    else
+                        # Default case without batch size in filename
+                        local label="r${r}_p${p}_w${w}_${s}"
+                        local file_path="${OUTPUT_DIR}/readers_${r}_processors_${p}_web_${w}_${s}_metrics.json"
+                        if [ -f "$file_path" ]; then
+                            files_args="${files_args} '${label}:${file_path}'"
+                        fi
                     fi
                 done
             done
@@ -267,19 +299,6 @@ generate_plots() {
     local output_file="web_overhead_test_${timestamp}.png"
 
     print_msg "$GREEN" "Run the following command to generate metric plots: python3 $PLOT_SCRIPT --files $files_args --mode new -o $output_file"
-
-    # Run the plot script
-    # print_msg "$GREEN" "Generating plots with $(echo $files_args | wc -w) metric files..."
-    # eval "python3 $PLOT_SCRIPT --files $files_args --mode new -o $output_file"
-
-    # if [ $? -eq 0 ]; then
-    #     print_msg "$GREEN" "✅ Plots generated successfully!"
-    #     print_msg "$GREEN" "   Individual plots: *_rps_pps_events.png"
-    #     print_msg "$GREEN" "   Aggregate plot: ${output_file%.png}_aggregate.png"
-    # else
-    #     print_msg "$RED" "Error: Failed to generate plots"
-    #     return 1
-    # fi
 }
 
 # Parse command line arguments
@@ -298,10 +317,6 @@ parse_args() {
                 TEST_REQUESTS="$2"
                 shift 2
                 ;;
-            --no-plot)
-                SKIP_PLOT=true
-                shift
-                ;;
             --only-web)
                 WEB_MODES="1"
                 shift
@@ -318,6 +333,10 @@ parse_args() {
                 STORAGE_FORMATS="$2"
                 shift 2
                 ;;
+            --batch-sizes)
+                BATCH_SIZES="$2"
+                shift 2
+                ;;
             -h|--help)
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
@@ -325,12 +344,12 @@ parse_args() {
                 echo "  -r, --readers RANGE      Set reader counts (default: '1 2 3 4 5')"
                 echo "  -p, --processors RANGE   Set processor counts (default: '1 2 3 4 5')"
                 echo "  -n, --requests NUM       Number of test requests (default: 10000)"
-                echo "  --only-web              Test only with web mode enabled"
-                echo "  --no-web                Test only with web mode disabled"
-                echo "  --flood                 Flood mode - run curl requests in background without waiting"
-                echo "  --storage FORMATS      Storage formats to test: 'jsonl', 'sqlite', 'protobuf', or combinations (default: jsonl)"
-                echo "  --no-plot               Skip plot generation after tests"
-                echo "  -h, --help              Show this help message"
+                echo "  --only-web               Test only with web mode enabled"
+                echo "  --no-web                 Test only with web mode disabled"
+                echo "  --flood                  Flood mode - run curl requests in background without waiting"
+                echo "  --storage FORMATS        Storage formats to test: 'jsonl', 'protobuf', or combinations (default: jsonl)"
+                echo "  --batch-sizes SIZES      Batch sizes to test: e.g. '100 500 1000 2000' (default: uses xgotop default)"
+                echo "  -h, --help               Show this help message"
                 echo ""
                 echo "Examples:"
                 echo "  $0                                    # Run with defaults (both web modes)"
@@ -339,8 +358,8 @@ parse_args() {
                 echo "  $0 --only-web                        # Test only with web mode enabled"
                 echo "  $0 --no-web                          # Test only with web mode disabled"
                 echo "  $0 --flood -n 50000                  # Flood mode with 50000 concurrent requests"
-                echo "  $0 --storage 'jsonl sqlite protobuf' # Test all storage formats"
-                echo "  $0 -n 5000 --no-plot                 # 5000 requests, no plotting"
+                echo "  $0 --storage 'jsonl protobuf'        # Test all storage formats"
+                echo "  $0 --batch-sizes '100 500 1000 2000' # Test different batch sizes"
                 exit 0
                 ;;
             *)
@@ -365,6 +384,13 @@ main() {
     print_msg "$BLUE" "  Output directory: $OUTPUT_DIR"
     print_msg "$BLUE" "  Storage formats: $STORAGE_FORMATS"
 
+    # Show batch sizes configuration
+    if [ ! -z "$BATCH_SIZES" ]; then
+        print_msg "$BLUE" "  Batch sizes: $BATCH_SIZES"
+    else
+        print_msg "$BLUE" "  Batch sizes: DEFAULT (xgotop default of 1000)"
+    fi
+
     # Show web mode configuration
     if [ "$WEB_MODES" = "1" ]; then
         print_msg "$BLUE" "  Web mode: ONLY WEB (--only-web)"
@@ -388,29 +414,44 @@ main() {
     local processor_count=$(echo $PROCESSORS_RANGE | wc -w)
     local web_mode_count=$(echo $WEB_MODES | wc -w)
     local storage_count=$(echo $STORAGE_FORMATS | wc -w)
-    total_tests=$((reader_count * processor_count * web_mode_count * storage_count))
+    # If batch sizes are specified, use that count; otherwise default test count = 1
+    local batch_count=1
+    if [ ! -z "$BATCH_SIZES" ]; then
+        batch_count=$(echo $BATCH_SIZES | wc -w)
+    fi
+    total_tests=$((reader_count * processor_count * web_mode_count * storage_count * batch_count))
     current_test=0
+
+    # If batch sizes are not specified, use empty string to run with default
+    local batch_sizes_to_test="$BATCH_SIZES"
+    if [ -z "$BATCH_SIZES" ]; then
+        batch_sizes_to_test=""  # This will run once with no batch size parameter
+    fi
 
     for readers in $READERS_RANGE; do
         for processors in $PROCESSORS_RANGE; do
             for web_mode in $WEB_MODES; do
                 for storage in $STORAGE_FORMATS; do
-                    current_test=$((current_test + 1))
-                    print_msg "$YELLOW" "\n>>> Progress: $current_test/$total_tests tests"
-                    run_test $readers $processors $web_mode $storage
+                    # If batch sizes are specified, loop through them
+                    if [ ! -z "$BATCH_SIZES" ]; then
+                        for batch in $BATCH_SIZES; do
+                            current_test=$((current_test + 1))
+                            print_msg "$YELLOW" "\n>>> Progress: $current_test/$total_tests tests"
+                            run_test $readers $processors $web_mode $storage $batch
+                        done
+                    else
+                        # Run once with no batch size specified (uses default)
+                        current_test=$((current_test + 1))
+                        print_msg "$YELLOW" "\n>>> Progress: $current_test/$total_tests tests"
+                        run_test $readers $processors $web_mode $storage ""
+                    fi
                 done
             done
         done
     done
 
     print_msg "$GREEN" "\n✅ All tests completed!"
-
-    # Generate plots unless skipped
-    if [ "$SKIP_PLOT" != "true" ]; then
-        generate_plots
-    else
-        print_msg "$YELLOW" "Skipping plot generation (--no-plot specified)"
-    fi
+    generate_plots
 }
 
 # Run main function with all arguments

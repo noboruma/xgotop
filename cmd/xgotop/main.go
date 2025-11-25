@@ -39,7 +39,7 @@ var (
 	// Web mode flags
 	webMode       = flag.Bool("web", false, "Enable web mode with API server and WebSocket")
 	webPort       = flag.Int("web-port", 8080, "Port for web API server")
-	storageFormat = flag.String("storage-format", "jsonl", "Storage format: jsonl or sqlite")
+	storageFormat = flag.String("storage-format", "jsonl", "Storage format: jsonl or protobuf")
 	storageDir    = flag.String("storage-dir", "./sessions", "Directory for storing session data")
 
 	silent                = flag.Bool("s", false, "Enable silent mode")
@@ -325,13 +325,15 @@ func main() {
 	metricEWP := make([]float64, 0, 1_000)
 	metricLAT := make([]float64, 0, 1_000)
 	metricPRC := make([]float64, 0, 1_000)
-	metricBSZ := make([]float64, 0, 1_000) // Batch Size
 	metricBPS := make([]float64, 0, 1_000) // Batches Per Second
 	metricBFL := make([]float64, 0, 1_000) // Batch Flush Latency
+	metricQWL := make([]float64, 0, 1_000) // Queue Wait Latency (ringbuffer to processor)
 	metricTimestamps := make([]float64, 0, 1_000)
 
 	// Batch metrics tracking
-	var batchSizeSum, batchSizeCount, batchesPerSecond, batchFlushLatencySum, batchFlushLatencyCount atomic.Int64
+	var batchesPerSecond, batchFlushLatencySum, batchFlushLatencyCount atomic.Int64
+	// Queue wait latency tracking
+	var queueWaitLatencySum, queueWaitLatencyCount atomic.Int64
 
 	// Monitor for stop signals and close the ringbuffer reader to unblock all readers
 	go func() {
@@ -357,8 +359,11 @@ func main() {
 				procEvs := procEventCount.Swap(0)
 				rps := float64(readEvs) * float64(time.Second) / float64(statsInterval)
 				pps := float64(procEvs) * float64(time.Second) / float64(statsInterval)
-				log.Printf("[Stats] RPS: %.2f ev/sec (%.2f ev/sec per worker)", rps, rps/float64(*readWorkers))
-				log.Printf("[Stats] PPS: %.2f ev/sec (%.2f ev/sec per worker)", pps, pps/float64(*processWorkers))
+
+				if !*silent {
+					log.Printf("[Stats] RPS: %.2f ev/sec (%.2f ev/sec per worker)", rps, rps/float64(*readWorkers))
+					log.Printf("[Stats] PPS: %.2f ev/sec (%.2f ev/sec per worker)", pps, pps/float64(*processWorkers))
+				}
 
 				// Queue stats
 				ec := eventCount.Load()
@@ -368,7 +373,9 @@ func main() {
 				if ediff < 0 {
 					sign = ""
 				}
-				log.Printf("[Stats] EWP: %d (%s%d)", ec, sign, ediff)
+				if !*silent {
+					log.Printf("[Stats] EWP: %d (%s%d)", ec, sign, ediff)
+				}
 
 				// Latency stats
 				var lat float64
@@ -386,9 +393,13 @@ func main() {
 						prog = *binaryPath
 					}
 
-					log.Printf("[Stats] LAT: %d (%.2f%% of %v)", latAvg, latPerc, prog)
+					if !*silent {
+						log.Printf("[Stats] LAT: %d (%.2f%% of %v)", latAvg, latPerc, prog)
+					}
 				} else {
-					log.Printf("[Stats] LAT: NaN")
+					if !*silent {
+						log.Printf("[Stats] LAT: NaN")
+					}
 					lat = 0
 				}
 
@@ -399,32 +410,31 @@ func main() {
 					procSum := processingTimeNsSum.Load()
 					procAvg := procSum / procCnt
 					procTime = float64(procAvg)
-					log.Printf("[Stats] PRC: %d ns/event", procAvg)
+
+					if !*silent {
+						log.Printf("[Stats] PRC: %d ns/event", procAvg)
+					}
 				} else {
-					log.Printf("[Stats] PRC: NaN")
+					if !*silent {
+						log.Printf("[Stats] PRC: NaN")
+					}
 					procTime = 0
 				}
 
 				// Batch stats
-				var batchSize, batchFlushLatency, batchesPerSec float64
-				bszCnt := batchSizeCount.Load()
-				if bszCnt != 0 {
-					bszSum := batchSizeSum.Load()
-					bszAvg := bszSum / bszCnt
-					batchSize = float64(bszAvg)
-					log.Printf("[Stats] BSZ: %d events/batch", bszAvg)
-				} else {
-					log.Printf("[Stats] BSZ: NaN")
-					batchSize = 0
-				}
+				var batchFlushLatency, batchesPerSec float64
 
 				// Batches per second
 				bps := batchesPerSecond.Load()
 				if bps != 0 {
 					batchesPerSec = float64(bps) / 1000.0 // Divide by 1000 as we stored it multiplied
-					log.Printf("[Stats] BPS: %.2f batches/sec", batchesPerSec)
+					if !*silent {
+						log.Printf("[Stats] BPS: %.2f batches/sec", batchesPerSec)
+					}
 				} else {
-					log.Printf("[Stats] BPS: NaN")
+					if !*silent {
+						log.Printf("[Stats] BPS: NaN")
+					}
 					batchesPerSec = 0
 				}
 
@@ -434,10 +444,31 @@ func main() {
 					bflSum := batchFlushLatencySum.Load()
 					bflAvg := bflSum / bflCnt
 					batchFlushLatency = float64(bflAvg)
-					log.Printf("[Stats] BFL: %d ns/batch\n\n", bflAvg)
+					if !*silent {
+						log.Printf("[Stats] BFL: %d ns/batch", bflAvg)
+					}
 				} else {
-					log.Printf("[Stats] BFL: NaN\n\n")
+					if !*silent {
+						log.Printf("[Stats] BFL: NaN")
+					}
 					batchFlushLatency = 0
+				}
+
+				// Queue wait latency
+				var queueWaitLatency float64
+				qwlCnt := queueWaitLatencyCount.Load()
+				if qwlCnt != 0 {
+					qwlSum := queueWaitLatencySum.Load()
+					qwlAvg := qwlSum / qwlCnt
+					queueWaitLatency = float64(qwlAvg)
+					if !*silent {
+						log.Printf("[Stats] QWL: %d ns/event\n\n", qwlAvg)
+					}
+				} else {
+					if !*silent {
+						log.Printf("[Stats] QWL: NaN\n\n")
+					}
+					queueWaitLatency = 0
 				}
 
 				metricRPS = append(metricRPS, rps)
@@ -445,10 +476,23 @@ func main() {
 				metricEWP = append(metricEWP, float64(ec))
 				metricLAT = append(metricLAT, lat)
 				metricPRC = append(metricPRC, procTime)
-				metricBSZ = append(metricBSZ, batchSize)
 				metricBPS = append(metricBPS, batchesPerSec)
 				metricBFL = append(metricBFL, batchFlushLatency)
+				metricQWL = append(metricQWL, queueWaitLatency)
 				metricTimestamps = append(metricTimestamps, float64(time.Now().UTC().UnixNano()))
+
+				// Update API server metrics if web UI is enabled
+				if apiServer != nil {
+					apiServer.UpdateMetrics(&api.Metrics{
+						RPS: rps,
+						PPS: pps,
+						EWP: ec,
+						LAT: lat,
+						PRC: int64(procTime),
+						BFL: batchFlushLatency,
+						QWL: queueWaitLatency,
+					})
+				}
 			}
 		}
 	}(readersStopped)
@@ -471,6 +515,27 @@ func main() {
 
 					log.Printf("[RW-%d] Read error: %v", i, err)
 					continue
+				}
+
+				// Get current kernel monotonic time (same clock as bpf_ktime_get_ns)
+				readTimeKernel := getMonotonicNs()
+
+				// Calculate how long this event waited in the ringbuffer
+				// Since both timestamps use the same clock, simple subtraction works!
+				if readTimeKernel >= event.Timestamp {
+					ringbufferWaitTime := int64(readTimeKernel - event.Timestamp)
+					queueWaitLatencySum.Add(ringbufferWaitTime)
+					queueWaitLatencyCount.Add(1)
+
+					if ringbufferWaitTime >= 100*time.Millisecond.Nanoseconds() {
+						// Log unusually high wait times
+						log.Printf("[RW-%d] High ringbuffer wait time: %d ns (%.2f ms)", i,
+							ringbufferWaitTime, float64(ringbufferWaitTime)/1e6)
+					}
+				} else {
+					// This shouldn't happen - would mean we read the event before it was written!
+					log.Printf("[RW-%d] Time inconsistency: readTime=%d < eventTime=%d", i,
+						readTimeKernel, event.Timestamp)
 				}
 
 				eventCh <- event
@@ -525,8 +590,6 @@ func main() {
 				batchDuration := time.Since(batchStart).Nanoseconds()
 				batchFlushLatencySum.Add(batchDuration)
 				batchFlushLatencyCount.Add(1)
-				batchSizeSum.Add(int64(len(batch)))
-				batchSizeCount.Add(1)
 
 				// Calculate batches per second
 				timeSinceLastBatch := time.Since(lastBatchTime)
@@ -581,6 +644,7 @@ func main() {
 						flushBatch()
 						return
 					}
+
 					eventCount.Add(-1)
 					procEventCount.Add(1)
 					probeDurationNsCount.Add(1)
@@ -623,9 +687,9 @@ func main() {
 		Ewp         []float64      `json:"ewp"`
 		Lat         []float64      `json:"lat"`
 		Prc         []float64      `json:"prc"`
-		Bsz         []float64      `json:"bsz"`
 		Bps         []float64      `json:"bps"`
 		Bfl         []float64      `json:"bfl"`
+		Qwl         []float64      `json:"qwl"`
 		Ts          []float64      `json:"ts"`
 		EventCounts map[int]uint64 `json:"event_counts"`
 	}{
@@ -634,9 +698,9 @@ func main() {
 		Ewp: metricEWP,
 		Lat: metricLAT,
 		Prc: metricPRC,
-		Bsz: metricBSZ,
 		Bps: metricBPS,
 		Bfl: metricBFL,
+		Qwl: metricQWL,
 		Ts:  metricTimestamps,
 		EventCounts: map[int]uint64{
 			0: eventCountsByType.casGStatus.Load(),

@@ -13,33 +13,41 @@ interface EventStoreState {
   goroutines: Map<number, GoroutineState>;
   viewport: ViewportState;
   isConnected: boolean;
-  
+  baseTimestamp: number | null; // First event timestamp for normalization
+
   addEvent: (event: Event) => void;
   addEvents: (events: Event[]) => void;
   clearEvents: () => void;
   setConnected: (connected: boolean) => void;
   setViewport: (viewport: Partial<ViewportState>) => void;
   getGoroutine: (id: number) => GoroutineState | undefined;
+  cleanupExitedGoroutines: (maxAge: number) => void; // maxAge in seconds
 }
 
-function processEvent(goroutines: Map<number, GoroutineState>, event: Event): Map<number, GoroutineState> {
+function processEvent(goroutines: Map<number, GoroutineState>, event: Event, baseTimestamp: number): Map<number, GoroutineState> {
   const newMap = new Map(goroutines);
-  
-  switch (event.event_type) {
+
+  // Normalize the timestamp relative to the first event
+  const normalizedEvent = {
+    ...event,
+    timestamp: event.timestamp - baseTimestamp
+  };
+
+  switch (normalizedEvent.event_type) {
     case 0: { // CasGStatus
-      const goroutineId = event.attributes[2];
-      const oldState = event.attributes[0];
-      const newState = event.attributes[1];
+      const goroutineId = normalizedEvent.attributes[2];
+      const oldState = normalizedEvent.attributes[0];
+      const newState = normalizedEvent.attributes[1];
       
       let goroutine = newMap.get(goroutineId);
       if (!goroutine) {
         goroutine = {
           id: goroutineId,
-          parentId: event.parent_goroutine,
+          parentId: normalizedEvent.parent_goroutine,
           states: [],
           allocations: [],
           newobjects: [],
-          createdAt: event.timestamp,
+          createdAt: normalizedEvent.timestamp,
         };
         newMap.set(goroutineId, goroutine);
       }
@@ -47,98 +55,98 @@ function processEvent(goroutines: Map<number, GoroutineState>, event: Event): Ma
       // Calculate duration of previous state
       if (goroutine.states.length > 0) {
         const prevState = goroutine.states[goroutine.states.length - 1];
-        prevState.duration = event.timestamp - prevState.timestamp;
+        prevState.duration = normalizedEvent.timestamp - prevState.timestamp;
       }
       
       goroutine.states.push({
-        timestamp: event.timestamp,
+        timestamp: normalizedEvent.timestamp,
         oldState,
         newState,
       });
       
       // Check if goroutine is dead
       if (newState === 6) { // G_STATUS_DEAD
-        goroutine.exitedAt = event.timestamp;
+        goroutine.exitedAt = normalizedEvent.timestamp;
+        goroutine.exitedAtRealTime = Date.now(); // Track real time when goroutine died
       }
       break;
     }
     
     case 1: { // MakeSlice
-      const goroutineId = event.goroutine;
+      const goroutineId = normalizedEvent.goroutine;
       let goroutine = newMap.get(goroutineId);
       if (!goroutine) {
         goroutine = {
           id: goroutineId,
-          parentId: event.parent_goroutine,
+          parentId: normalizedEvent.parent_goroutine,
           states: [],
           allocations: [],
           newobjects: [],
-          createdAt: event.timestamp,
+          createdAt: normalizedEvent.timestamp,
         };
         newMap.set(goroutineId, goroutine);
       }
-      
+
       goroutine.allocations.push({
-        timestamp: event.timestamp,
+        timestamp: normalizedEvent.timestamp,
         type: 'makeslice',
-        typeKind: event.attributes[1],
-        length: event.attributes[2],
-        capacity: event.attributes[3],
+        typeKind: normalizedEvent.attributes[1],
+        length: normalizedEvent.attributes[2],
+        capacity: normalizedEvent.attributes[3],
       });
       break;
     }
     
     case 2: { // MakeMap
-      const goroutineId = event.goroutine;
+      const goroutineId = normalizedEvent.goroutine;
       let goroutine = newMap.get(goroutineId);
       if (!goroutine) {
         goroutine = {
           id: goroutineId,
-          parentId: event.parent_goroutine,
+          parentId: normalizedEvent.parent_goroutine,
           states: [],
           allocations: [],
           newobjects: [],
-          createdAt: event.timestamp,
+          createdAt: normalizedEvent.timestamp,
         };
         newMap.set(goroutineId, goroutine);
       }
-      
+
       goroutine.allocations.push({
-        timestamp: event.timestamp,
+        timestamp: normalizedEvent.timestamp,
         type: 'makemap',
-        typeKind: event.attributes[1], // key kind
-        typeKind2: event.attributes[2], // elem kind
-        hint: event.attributes[3],
+        typeKind: normalizedEvent.attributes[1], // key kind
+        typeKind2: normalizedEvent.attributes[2], // elem kind
+        hint: normalizedEvent.attributes[3],
       });
       break;
     }
     
     case 3: { // NewObject
-      const goroutineId = event.goroutine;
+      const goroutineId = normalizedEvent.goroutine;
       let goroutine = newMap.get(goroutineId);
       if (!goroutine) {
         goroutine = {
           id: goroutineId,
-          parentId: event.parent_goroutine,
+          parentId: normalizedEvent.parent_goroutine,
           states: [],
           allocations: [],
           newobjects: [],
-          createdAt: event.timestamp,
+          createdAt: normalizedEvent.timestamp,
         };
         newMap.set(goroutineId, goroutine);
       }
-      
       goroutine.newobjects.push({
-        timestamp: event.timestamp,
-        size: event.attributes[0],
-        kind: event.attributes[1],
+        timestamp: normalizedEvent.timestamp,
+        size: normalizedEvent.attributes[0],
+        kind: normalizedEvent.attributes[1],
       });
       break;
     }
     
     case 4: { // NewGoroutine
-      const parentId = event.attributes[0];
-      const newId = event.attributes[1];
+      const parentId = normalizedEvent.attributes[0];
+      const newId = normalizedEvent.attributes[1];
       
       let goroutine = newMap.get(newId);
       if (!goroutine) {
@@ -148,7 +156,7 @@ function processEvent(goroutines: Map<number, GoroutineState>, event: Event): Ma
           states: [],
           allocations: [],
           newobjects: [],
-          createdAt: event.timestamp,
+          createdAt: normalizedEvent.timestamp,
         };
         newMap.set(newId, goroutine);
       }
@@ -156,10 +164,11 @@ function processEvent(goroutines: Map<number, GoroutineState>, event: Event): Ma
     }
     
     case 5: { // GoExit
-      const goroutineId = event.attributes[0];
+      const goroutineId = normalizedEvent.attributes[0];
       const goroutine = newMap.get(goroutineId);
       if (goroutine) {
-        goroutine.exitedAt = event.timestamp;
+        goroutine.exitedAt = normalizedEvent.timestamp;
+        goroutine.exitedAtRealTime = Date.now(); // Track real time when goroutine died
       }
       break;
     }
@@ -175,22 +184,28 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     scrollX: 0,
     zoom: 1,
     timeStart: 0,
-    timeEnd: 0,
+    timeEnd: 60000000000, // 60 seconds in nanoseconds
   },
   isConnected: false,
+  baseTimestamp: null,
   
   addEvent: (event) => {
     set((state) => {
+      // Set base timestamp if this is the first event
+      const baseTimestamp = state.baseTimestamp ?? event.timestamp;
+
       const events = [...state.events, event];
-      const goroutines = processEvent(state.goroutines, event);
-      
-      // Update time bounds
-      const timeEnd = Math.max(state.viewport.timeEnd, event.timestamp);
-      const timeStart = state.viewport.timeStart === 0 ? event.timestamp : state.viewport.timeStart;
-      
+      const goroutines = processEvent(state.goroutines, event, baseTimestamp);
+
+      // Update time bounds with normalized timestamps
+      const normalizedTimestamp = event.timestamp - baseTimestamp;
+      const timeEnd = Math.max(state.viewport.timeEnd, normalizedTimestamp);
+      const timeStart = state.viewport.timeStart === 0 ? 0 : state.viewport.timeStart;
+
       return {
         events,
         goroutines,
+        baseTimestamp,
         viewport: {
           ...state.viewport,
           timeStart,
@@ -202,23 +217,27 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
   
   addEvents: (newEvents) => {
     set((state) => {
+      if (newEvents.length === 0) return state;
+
+      // Set base timestamp if this is the first event
+      const baseTimestamp = state.baseTimestamp ?? newEvents[0].timestamp;
+
       let goroutines = state.goroutines;
       for (const event of newEvents) {
-        goroutines = processEvent(goroutines, event);
+        goroutines = processEvent(goroutines, event, baseTimestamp);
       }
-      
+
       const events = [...state.events, ...newEvents];
-      
-      // Update time bounds
-      const timestamps = newEvents.map(e => e.timestamp);
-      const timeEnd = Math.max(state.viewport.timeEnd, ...timestamps);
-      const timeStart = state.viewport.timeStart === 0 && timestamps.length > 0
-        ? Math.min(...timestamps)
-        : state.viewport.timeStart;
-      
+
+      // Update time bounds with normalized timestamps
+      const normalizedTimestamps = newEvents.map(e => e.timestamp - baseTimestamp);
+      const timeEnd = Math.max(state.viewport.timeEnd, ...normalizedTimestamps);
+      const timeStart = state.viewport.timeStart === 0 ? 0 : state.viewport.timeStart;
+
       return {
         events,
         goroutines,
+        baseTimestamp,
         viewport: {
           ...state.viewport,
           timeStart,
@@ -232,6 +251,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     set({
       events: [],
       goroutines: new Map(),
+      baseTimestamp: null,
       viewport: {
         scrollX: 0,
         zoom: 1,
@@ -253,6 +273,26 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
   
   getGoroutine: (id) => {
     return get().goroutines.get(id);
+  },
+
+  cleanupExitedGoroutines: (maxAge) => {
+    set((state) => {
+      const newGoroutines = new Map(state.goroutines);
+      const currentTimeMs = Date.now();
+
+      // Remove goroutines that have been exited for longer than maxAge
+      newGoroutines.forEach((goroutine, id) => {
+        if (goroutine.exitedAt && goroutine.exitedAtRealTime) {
+          const timeSinceExitMs = currentTimeMs - goroutine.exitedAtRealTime;
+          const timeSinceExitSec = timeSinceExitMs / 1000;
+          if (timeSinceExitSec > maxAge) {
+            newGoroutines.delete(id);
+          }
+        }
+      });
+
+      return { ...state, goroutines: newGoroutines };
+    });
   },
 }));
 
