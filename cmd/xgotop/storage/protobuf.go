@@ -96,7 +96,7 @@ func (s *ProtobufStore) WriteEvent(event *Event) error {
 	defer s.mu.Unlock()
 
 	// Convert to protobuf event
-	pbEvent := &PBEvent{
+	pbEvent := &RuntimeEvent{
 		Timestamp:       event.Timestamp,
 		EventType:       uint64(event.EventType),
 		Goroutine:       event.Goroutine,
@@ -132,12 +132,12 @@ func (s *ProtobufStore) WriteBatch(events []*Event) error {
 	defer s.mu.Unlock()
 
 	// Create a batch message
-	batch := &PBEventBatch{
-		Events: make([]*PBEvent, len(events)),
+	batch := &RuntimeEventBatch{
+		Events: make([]*RuntimeEvent, len(events)),
 	}
 
 	for i, event := range events {
-		batch.Events[i] = &PBEvent{
+		batch.Events[i] = &RuntimeEvent{
 			Timestamp:       event.Timestamp,
 			EventType:       uint64(event.EventType),
 			Goroutine:       event.Goroutine,
@@ -229,7 +229,7 @@ func (s *ProtobufStore) ReadEvents(ctx context.Context, filter *EventFilter) ([]
 			}
 
 			// Unmarshal batch
-			batch := &PBEventBatch{}
+			batch := &RuntimeEventBatch{}
 			if err := proto.Unmarshal(data, batch); err != nil {
 				return nil, fmt.Errorf("unmarshal batch: %w", err)
 			}
@@ -252,7 +252,7 @@ func (s *ProtobufStore) ReadEvents(ctx context.Context, filter *EventFilter) ([]
 			}
 
 			// Unmarshal event
-			pbEvent := &PBEvent{}
+			pbEvent := &RuntimeEvent{}
 			if err := proto.Unmarshal(data, pbEvent); err != nil {
 				return nil, fmt.Errorf("unmarshal event: %w", err)
 			}
@@ -373,7 +373,7 @@ func countProtobufEvents(path string) (int64, error) {
 				return 0, fmt.Errorf("read batch data: %w", err)
 			}
 
-			batch := &PBEventBatch{}
+			batch := &RuntimeEventBatch{}
 			if err := proto.Unmarshal(data, batch); err != nil {
 				return 0, fmt.Errorf("unmarshal batch: %w", err)
 			}
@@ -391,7 +391,7 @@ func countProtobufEvents(path string) (int64, error) {
 	return count, nil
 }
 
-func shouldIncludeEvent(pbEvent *PBEvent, filter *EventFilter, offset int, currentCount int) bool {
+func shouldIncludeEvent(pbEvent *RuntimeEvent, filter *EventFilter, offset int, currentCount int) bool {
 	if filter == nil {
 		return true
 	}
@@ -421,7 +421,7 @@ func shouldIncludeEvent(pbEvent *PBEvent, filter *EventFilter, offset int, curre
 	return true
 }
 
-func convertFromProto(pbEvent *PBEvent) *Event {
+func convertFromProto(pbEvent *RuntimeEvent) *Event {
 	event := &Event{
 		Timestamp:       pbEvent.Timestamp,
 		EventType:       EventType(pbEvent.EventType),

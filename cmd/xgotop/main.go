@@ -9,12 +9,9 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"math"
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -55,6 +52,7 @@ var (
 )
 
 const (
+	// Symbols defined in xgotop.bpf.c
 	symbolCasgstatus = "runtime.casgstatus"
 	symbolMakeslice  = "runtime.makeslice"
 	symbolMakemap    = "runtime.makemap"
@@ -91,77 +89,12 @@ type eventCounts struct {
 	goExit       atomic.Uint64
 }
 
-// parseSamplingRates parses the sampling rates from the command line flag
-func parseSamplingRates(ratesStr string) (map[storage.EventType]uint32, error) {
-	rates := make(map[storage.EventType]uint32)
-
-	if ratesStr == "" {
-		return rates, nil
-	}
-
-	pairs := strings.Split(ratesStr, ",")
-	for _, pair := range pairs {
-		parts := strings.Split(pair, ":")
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid sampling rate format: %s", pair)
-		}
-
-		eventName := strings.TrimSpace(parts[0])
-		eventType, ok := eventNameToType[eventName]
-		if !ok {
-			return nil, fmt.Errorf("unknown event name: %s", eventName)
-		}
-
-		rate, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid rate for %s: %v", eventName, err)
-		}
-
-		if rate < 0 || rate > 1 {
-			return nil, fmt.Errorf("sampling rate must be between 0 and 1, got %f", rate)
-		}
-
-		// Convert to percentage (0-100)
-		// Use math.Round to handle floating point precision issues
-		percentage := uint32(math.Round(rate * 100))
-		rates[eventType] = percentage
-	}
-
-	return rates, nil
-}
-
-// getEventName returns the name of an event type for logging
-func getEventName(eventType storage.EventType) string {
-	for name, et := range eventNameToType {
-		if et == eventType {
-			return name
-		}
-	}
-	return fmt.Sprintf("unknown(%d)", eventType)
-}
-
 func main() {
 	log.SetPrefix("xgotop: ")
 	log.SetFlags(log.Ltime)
 
 	flag.Parse()
-
-	if *readWorkers <= 0 {
-		log.Fatal("-rw must be positive")
-	}
-
-	if *processWorkers <= 0 {
-		log.Fatal("-pw must be positive")
-	}
-
-	// Validate that either -b or -pid is provided
-	if *binaryPath == "" && *pid == 0 {
-		log.Fatal("either -b or -pid must be provided")
-	}
-
-	if *binaryPath != "" && *pid != 0 {
-		log.Fatal("only one of -b or -pid can be provided")
-	}
+	validateFlags()
 
 	// Determine the executable path
 	var executablePath string
@@ -250,7 +183,7 @@ func main() {
 			if err != nil {
 				log.Fatalf("Failed to update sampling rate for event %d: %v", eventType, err)
 			}
-			log.Printf("Set sampling rate for %s to %d%%", getEventName(eventType), rate)
+			log.Printf("Set sampling rate for %v to %d%%", eventType, rate)
 		}
 	} else if *samplingRates != "" {
 		log.Printf("Warning: Sampling rates map not available, sampling will not be applied")
@@ -292,23 +225,15 @@ func main() {
 
 	var eventCount atomic.Int64
 	var lastEventCount atomic.Int64
-	// eventCount.Store(0)
-	// lastEventCount.Store(0)
 
 	var readEventCount atomic.Uint64
 	var procEventCount atomic.Uint64
-	// readEventCount.Store(0)
-	// procEventCount.Store(0)
 
-	// Event counts by type
 	var eventCountsByType eventCounts
 
 	var probeDurationNsSum atomic.Int64
 	var probeDurationNsCount atomic.Int64
-	// probeDurationNsSum.Store(0)
-	// probeDurationNsCount.Store(0)
 
-	// Processing time metrics
 	var processingTimeNsSum atomic.Int64
 	var processingTimeNsCount atomic.Int64
 
@@ -325,17 +250,14 @@ func main() {
 	metricEWP := make([]float64, 0, 1_000)
 	metricLAT := make([]float64, 0, 1_000)
 	metricPRC := make([]float64, 0, 1_000)
-	metricBPS := make([]float64, 0, 1_000) // Batches Per Second
-	metricBFL := make([]float64, 0, 1_000) // Batch Flush Latency
-	metricQWL := make([]float64, 0, 1_000) // Queue Wait Latency (ringbuffer to processor)
+	metricBPS := make([]float64, 0, 1_000)
+	metricBFL := make([]float64, 0, 1_000)
+	metricQWL := make([]float64, 0, 1_000)
 	metricTimestamps := make([]float64, 0, 1_000)
 
-	// Batch metrics tracking
 	var batchesPerSecond, batchFlushLatencySum, batchFlushLatencyCount atomic.Int64
-	// Queue wait latency tracking
 	var queueWaitLatencySum, queueWaitLatencyCount atomic.Int64
 
-	// Monitor for stop signals and close the ringbuffer reader to unblock all readers
 	go func() {
 		<-stopper
 		log.Printf("[Main] Received stop signal, closing ringbuffer reader")
@@ -354,7 +276,6 @@ func main() {
 			case <-stopped:
 				return
 			case <-t.C:
-				// Reader/processor stats
 				readEvs := readEventCount.Swap(0)
 				procEvs := procEventCount.Swap(0)
 				rps := float64(readEvs) * float64(time.Second) / float64(statsInterval)
@@ -365,7 +286,6 @@ func main() {
 					log.Printf("[Stats] PPS: %.2f ev/sec (%.2f ev/sec per worker)", pps, pps/float64(*processWorkers))
 				}
 
-				// Queue stats
 				ec := eventCount.Load()
 				lec := lastEventCount.Swap(ec)
 				ediff := ec - lec
@@ -377,7 +297,6 @@ func main() {
 					log.Printf("[Stats] EWP: %d (%s%d)", ec, sign, ediff)
 				}
 
-				// Latency stats
 				var lat float64
 				latCnt := probeDurationNsCount.Load()
 				if latCnt != 0 {
@@ -386,15 +305,8 @@ func main() {
 					latPerc := float64(latSum) / float64(time.Since(probesAttachedAt).Nanoseconds()) * 100.0
 					lat = float64(latAvg)
 
-					var prog any
-					if *binaryPath == "" {
-						prog = *pid
-					} else {
-						prog = *binaryPath
-					}
-
 					if !*silent {
-						log.Printf("[Stats] LAT: %d (%.2f%% of %v)", latAvg, latPerc, prog)
+						log.Printf("[Stats] LAT: %d (%.2f%% of runtime)", latAvg, latPerc)
 					}
 				} else {
 					if !*silent {
@@ -403,7 +315,6 @@ func main() {
 					lat = 0
 				}
 
-				// Processing time stats
 				var procTime float64
 				procCnt := processingTimeNsCount.Load()
 				if procCnt != 0 {
@@ -421,13 +332,11 @@ func main() {
 					procTime = 0
 				}
 
-				// Batch stats
 				var batchFlushLatency, batchesPerSec float64
 
-				// Batches per second
 				bps := batchesPerSecond.Load()
 				if bps != 0 {
-					batchesPerSec = float64(bps) / 1000.0 // Divide by 1000 as we stored it multiplied
+					batchesPerSec = float64(bps) / 1000.0
 					if !*silent {
 						log.Printf("[Stats] BPS: %.2f batches/sec", batchesPerSec)
 					}
@@ -438,7 +347,6 @@ func main() {
 					batchesPerSec = 0
 				}
 
-				// Batch flush latency
 				bflCnt := batchFlushLatencyCount.Load()
 				if bflCnt != 0 {
 					bflSum := batchFlushLatencySum.Load()
@@ -454,7 +362,6 @@ func main() {
 					batchFlushLatency = 0
 				}
 
-				// Queue wait latency
 				var queueWaitLatency float64
 				qwlCnt := queueWaitLatencyCount.Load()
 				if qwlCnt != 0 {
@@ -481,7 +388,6 @@ func main() {
 				metricQWL = append(metricQWL, queueWaitLatency)
 				metricTimestamps = append(metricTimestamps, float64(time.Now().UTC().UnixNano()))
 
-				// Update API server metrics if web UI is enabled
 				if apiServer != nil {
 					apiServer.UpdateMetrics(&api.Metrics{
 						RPS: rps,
@@ -517,11 +423,8 @@ func main() {
 					continue
 				}
 
-				// Get current kernel monotonic time (same clock as bpf_ktime_get_ns)
 				readTimeKernel := getMonotonicNs()
 
-				// Calculate how long this event waited in the ringbuffer
-				// Since both timestamps use the same clock, simple subtraction works!
 				if readTimeKernel >= event.Timestamp {
 					ringbufferWaitTime := int64(readTimeKernel - event.Timestamp)
 					queueWaitLatencySum.Add(ringbufferWaitTime)
@@ -533,7 +436,7 @@ func main() {
 							ringbufferWaitTime, float64(ringbufferWaitTime)/1e6)
 					}
 				} else {
-					// This shouldn't happen - would mean we read the event before it was written!
+					// This shouldn't happen
 					log.Printf("[RW-%d] Time inconsistency: readTime=%d < eventTime=%d", i,
 						readTimeKernel, event.Timestamp)
 				}
@@ -553,13 +456,11 @@ func main() {
 			}()
 			log.Printf("[PW-%d] I'm alive!", i)
 
-			// Batch accumulator
 			batch := make([]*storage.Event, 0, *batchSize)
 			batchEbpfEvents := make([]*ebpfGoRuntimeEventT, 0, *batchSize)
 			flushTimer := time.NewTimer(*batchFlushInterval)
 			lastBatchTime := time.Now()
 
-			// Helper function to flush the batch
 			flushBatch := func() {
 				if len(batch) == 0 {
 					return
@@ -567,31 +468,26 @@ func main() {
 
 				batchStart := time.Now()
 
-				// Write batch to storage if web mode is enabled
 				if *webMode && eventStore != nil {
 					if err := eventStore.WriteBatch(batch); err != nil {
 						log.Printf("[PW-%d] Failed to write batch to storage: %v", id, err)
 					}
 
-					// Broadcast batch to WebSocket clients
 					if apiServer != nil {
 						apiServer.BroadcastBatch(batch)
 					}
 				}
 
-				// Log events if not in web mode
 				if !*webMode && !*silent {
 					for _, ebpfEvent := range batchEbpfEvents {
 						logEvent(id, ebpfEvent)
 					}
 				}
 
-				// Track batch metrics
 				batchDuration := time.Since(batchStart).Nanoseconds()
 				batchFlushLatencySum.Add(batchDuration)
 				batchFlushLatencyCount.Add(1)
 
-				// Calculate batches per second
 				timeSinceLastBatch := time.Since(lastBatchTime)
 				if timeSinceLastBatch > 0 {
 					bps := float64(time.Second) / float64(timeSinceLastBatch)
@@ -599,7 +495,6 @@ func main() {
 				}
 				lastBatchTime = time.Now()
 
-				// Clear the batch
 				batch = batch[:0]
 				batchEbpfEvents = batchEbpfEvents[:0]
 				flushTimer.Reset(*batchFlushInterval)
@@ -616,7 +511,6 @@ func main() {
 						probeDurationNsSum.Add(int64(event.ProbeDurationNs))
 						processStart := time.Now()
 
-						// Add to batch
 						storageEvent := convertToStorageEvent(event)
 						batch = append(batch, storageEvent)
 						batchEbpfEvents = append(batchEbpfEvents, event)
@@ -626,21 +520,17 @@ func main() {
 						processingTimeNsCount.Add(1)
 						updateEventCounts(&eventCountsByType, event)
 
-						// Flush if batch is full
 						if len(batch) >= *batchSize {
 							flushBatch()
 						}
 					}
-					// Flush any remaining events
 					flushBatch()
 					log.Printf("[PW-%d] Draining events channel complete", i)
 					return
 				case <-flushTimer.C:
-					// Flush on timer
 					flushBatch()
 				case event, ok := <-eventCh: // ', ok' idiom is used to prevent race condition
 					if !ok {
-						// Channel is closed, flush remaining and exit
 						flushBatch()
 						return
 					}
@@ -651,7 +541,6 @@ func main() {
 					probeDurationNsSum.Add(int64(event.ProbeDurationNs))
 					processStart := time.Now()
 
-					// Add to batch
 					storageEvent := convertToStorageEvent(event)
 					batch = append(batch, storageEvent)
 					batchEbpfEvents = append(batchEbpfEvents, event)
@@ -661,7 +550,6 @@ func main() {
 					processingTimeNsCount.Add(1)
 					updateEventCounts(&eventCountsByType, event)
 
-					// Flush if batch is full
 					if len(batch) >= *batchSize {
 						flushBatch()
 					}
@@ -681,55 +569,7 @@ func main() {
 	processWg.Wait()
 	log.Printf("All processors are done")
 
-	metrics := struct {
-		Rps         []float64      `json:"rps"`
-		Pps         []float64      `json:"pps"`
-		Ewp         []float64      `json:"ewp"`
-		Lat         []float64      `json:"lat"`
-		Prc         []float64      `json:"prc"`
-		Bps         []float64      `json:"bps"`
-		Bfl         []float64      `json:"bfl"`
-		Qwl         []float64      `json:"qwl"`
-		Ts          []float64      `json:"ts"`
-		EventCounts map[int]uint64 `json:"event_counts"`
-	}{
-		Rps: metricRPS,
-		Pps: metricPPS,
-		Ewp: metricEWP,
-		Lat: metricLAT,
-		Prc: metricPRC,
-		Bps: metricBPS,
-		Bfl: metricBFL,
-		Qwl: metricQWL,
-		Ts:  metricTimestamps,
-		EventCounts: map[int]uint64{
-			0: eventCountsByType.casGStatus.Load(),
-			1: eventCountsByType.makeSlice.Load(),
-			2: eventCountsByType.makeMap.Load(),
-			3: eventCountsByType.newObject.Load(),
-			4: eventCountsByType.newGoroutine.Load(),
-			5: eventCountsByType.goExit.Load(),
-		},
-	}
-	b, err := json.MarshalIndent(metrics, "", "  ")
-	must(err, "marshaling metric data")
-	prefix := *metricFilePrefix
-	if prefix != "" {
-		prefix = "_" + prefix
-	}
-	filename := "metrics"
-	if !*metricFileNoTimestamp {
-		filename += "_" + time.Now().UTC().Format("2006-01-02-15-04-05")
-	}
-	if prefix != "" {
-		filename += "_" + prefix
-	}
-	filename += ".json"
-	err = os.WriteFile(
-		filename,
-		b, 0666,
-	)
-	must(err, "writing metrics")
+	saveMetrics(metricRPS, metricPPS, metricEWP, metricLAT, metricPRC, metricBPS, metricBFL, metricQWL, metricTimestamps, &eventCountsByType)
 }
 
 func must(err error, op string) {
@@ -861,4 +701,85 @@ func kindToString(kind Kind) string {
 	default:
 		return fmt.Sprintf("Unknown kind: %d", kind)
 	}
+}
+
+func validateFlags() {
+	if *readWorkers <= 0 {
+		log.Fatal("-rw must be positive")
+	}
+
+	if *processWorkers <= 0 {
+		log.Fatal("-pw must be positive")
+	}
+
+	if *binaryPath == "" && *pid == 0 {
+		log.Fatal("either -b or -pid must be provided")
+	}
+
+	if *binaryPath != "" && *pid != 0 {
+		log.Fatal("only one of -b or -pid can be provided")
+	}
+}
+
+func saveMetrics(
+	metricRPS []float64,
+	metricPPS []float64,
+	metricEWP []float64,
+	metricLAT []float64,
+	metricPRC []float64,
+	metricBPS []float64,
+	metricBFL []float64,
+	metricQWL []float64,
+	metricTimestamps []float64,
+	eventCountsByType *eventCounts,
+) {
+	metrics := struct {
+		Rps         []float64      `json:"rps"`
+		Pps         []float64      `json:"pps"`
+		Ewp         []float64      `json:"ewp"`
+		Lat         []float64      `json:"lat"`
+		Prc         []float64      `json:"prc"`
+		Bps         []float64      `json:"bps"`
+		Bfl         []float64      `json:"bfl"`
+		Qwl         []float64      `json:"qwl"`
+		Ts          []float64      `json:"ts"`
+		EventCounts map[int]uint64 `json:"event_counts"`
+	}{
+		Rps: metricRPS,
+		Pps: metricPPS,
+		Ewp: metricEWP,
+		Lat: metricLAT,
+		Prc: metricPRC,
+		Bps: metricBPS,
+		Bfl: metricBFL,
+		Qwl: metricQWL,
+		Ts:  metricTimestamps,
+		EventCounts: map[int]uint64{
+			0: eventCountsByType.casGStatus.Load(),
+			1: eventCountsByType.makeSlice.Load(),
+			2: eventCountsByType.makeMap.Load(),
+			3: eventCountsByType.newObject.Load(),
+			4: eventCountsByType.newGoroutine.Load(),
+			5: eventCountsByType.goExit.Load(),
+		},
+	}
+	b, err := json.MarshalIndent(metrics, "", "  ")
+	must(err, "marshaling metric data")
+	prefix := *metricFilePrefix
+	if prefix != "" {
+		prefix = "_" + prefix
+	}
+	filename := "metrics"
+	if !*metricFileNoTimestamp {
+		filename += "_" + time.Now().UTC().Format("2006-01-02-15-04-05")
+	}
+	if prefix != "" {
+		filename += "_" + prefix
+	}
+	filename += ".json"
+	err = os.WriteFile(
+		filename,
+		b, 0666,
+	)
+	must(err, "writing metrics")
 }

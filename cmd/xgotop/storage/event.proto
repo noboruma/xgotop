@@ -4,25 +4,31 @@ package storage;
 
 option go_package = "go.sazak.io/xgotop/cmd/xgotop/storage";
 
-// PBEvent represents a Go runtime event in protobuf format
-message PBEvent {
+// RuntimeEvent represents a Go runtime event in protobuf format
+// This message mimics struct go_runtime_event defined in xgotop.h
+message RuntimeEvent {
     uint64 timestamp = 1;
     uint64 event_type = 2;
     uint32 goroutine = 3;
     uint32 parent_goroutine = 4;
-    repeated uint64 attributes = 5; // Array of 5 attributes
+    repeated uint64 attributes = 5;
 }
 
-// PBEventBatch represents a batch of events for efficient storage
-message PBEventBatch {
-    repeated PBEvent events = 1;
+// RuntimeEventBatch represents a batch of events for efficient storage
+message RuntimeEventBatch {
+    repeated RuntimeEvent events = 1;
 }
 
 // PBSession represents a recording session metadata
 message PBSession {
     string id = 1;
-    int64 start_time_unix = 2;  // Unix timestamp in nanoseconds
-    int64 end_time_unix = 3;    // Unix timestamp in nanoseconds (0 if not ended)
+
+    // Unix timestamp in nanoseconds
+    int64 start_time_unix = 2;
+
+    // Unix timestamp in nanoseconds (0 if not ended)
+    int64 end_time_unix = 3;
+
     int32 pid = 4;
     string binary_path = 5;
     int64 event_count = 6;
@@ -31,5 +37,5 @@ message PBSession {
 // PBStorageFile represents the complete storage file format
 message PBStorageFile {
     PBSession session = 1;
-    repeated PBEvent events = 2;
+    repeated RuntimeEvent events = 2;
 }

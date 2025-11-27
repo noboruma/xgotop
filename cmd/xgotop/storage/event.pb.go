@@ -21,32 +21,33 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// PBEvent represents a Go runtime event in protobuf format
-type PBEvent struct {
+// RuntimeEvent represents a Go runtime event in protobuf format
+// This message mimics struct go_runtime_event defined in xgotop.h
+type RuntimeEvent struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Timestamp       uint64                 `protobuf:"varint,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	EventType       uint64                 `protobuf:"varint,2,opt,name=event_type,json=eventType,proto3" json:"event_type,omitempty"`
 	Goroutine       uint32                 `protobuf:"varint,3,opt,name=goroutine,proto3" json:"goroutine,omitempty"`
 	ParentGoroutine uint32                 `protobuf:"varint,4,opt,name=parent_goroutine,json=parentGoroutine,proto3" json:"parent_goroutine,omitempty"`
-	Attributes      []uint64               `protobuf:"varint,5,rep,packed,name=attributes,proto3" json:"attributes,omitempty"` // Array of 5 attributes
+	Attributes      []uint64               `protobuf:"varint,5,rep,packed,name=attributes,proto3" json:"attributes,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
 
-func (x *PBEvent) Reset() {
-	*x = PBEvent{}
+func (x *RuntimeEvent) Reset() {
+	*x = RuntimeEvent{}
 	mi := &file_cmd_xgotop_storage_event_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PBEvent) String() string {
+func (x *RuntimeEvent) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PBEvent) ProtoMessage() {}
+func (*RuntimeEvent) ProtoMessage() {}
 
-func (x *PBEvent) ProtoReflect() protoreflect.Message {
+func (x *RuntimeEvent) ProtoReflect() protoreflect.Message {
 	mi := &file_cmd_xgotop_storage_event_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -58,68 +59,68 @@ func (x *PBEvent) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PBEvent.ProtoReflect.Descriptor instead.
-func (*PBEvent) Descriptor() ([]byte, []int) {
+// Deprecated: Use RuntimeEvent.ProtoReflect.Descriptor instead.
+func (*RuntimeEvent) Descriptor() ([]byte, []int) {
 	return file_cmd_xgotop_storage_event_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *PBEvent) GetTimestamp() uint64 {
+func (x *RuntimeEvent) GetTimestamp() uint64 {
 	if x != nil {
 		return x.Timestamp
 	}
 	return 0
 }
 
-func (x *PBEvent) GetEventType() uint64 {
+func (x *RuntimeEvent) GetEventType() uint64 {
 	if x != nil {
 		return x.EventType
 	}
 	return 0
 }
 
-func (x *PBEvent) GetGoroutine() uint32 {
+func (x *RuntimeEvent) GetGoroutine() uint32 {
 	if x != nil {
 		return x.Goroutine
 	}
 	return 0
 }
 
-func (x *PBEvent) GetParentGoroutine() uint32 {
+func (x *RuntimeEvent) GetParentGoroutine() uint32 {
 	if x != nil {
 		return x.ParentGoroutine
 	}
 	return 0
 }
 
-func (x *PBEvent) GetAttributes() []uint64 {
+func (x *RuntimeEvent) GetAttributes() []uint64 {
 	if x != nil {
 		return x.Attributes
 	}
 	return nil
 }
 
-// PBEventBatch represents a batch of events for efficient storage
-type PBEventBatch struct {
+// RuntimeEventBatch represents a batch of events for efficient storage
+type RuntimeEventBatch struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Events        []*PBEvent             `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
+	Events        []*RuntimeEvent        `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PBEventBatch) Reset() {
-	*x = PBEventBatch{}
+func (x *RuntimeEventBatch) Reset() {
+	*x = RuntimeEventBatch{}
 	mi := &file_cmd_xgotop_storage_event_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PBEventBatch) String() string {
+func (x *RuntimeEventBatch) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PBEventBatch) ProtoMessage() {}
+func (*RuntimeEventBatch) ProtoMessage() {}
 
-func (x *PBEventBatch) ProtoReflect() protoreflect.Message {
+func (x *RuntimeEventBatch) ProtoReflect() protoreflect.Message {
 	mi := &file_cmd_xgotop_storage_event_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -131,12 +132,12 @@ func (x *PBEventBatch) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PBEventBatch.ProtoReflect.Descriptor instead.
-func (*PBEventBatch) Descriptor() ([]byte, []int) {
+// Deprecated: Use RuntimeEventBatch.ProtoReflect.Descriptor instead.
+func (*RuntimeEventBatch) Descriptor() ([]byte, []int) {
 	return file_cmd_xgotop_storage_event_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *PBEventBatch) GetEvents() []*PBEvent {
+func (x *RuntimeEventBatch) GetEvents() []*RuntimeEvent {
 	if x != nil {
 		return x.Events
 	}
@@ -145,13 +146,15 @@ func (x *PBEventBatch) GetEvents() []*PBEvent {
 
 // PBSession represents a recording session metadata
 type PBSession struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	StartTimeUnix int64                  `protobuf:"varint,2,opt,name=start_time_unix,json=startTimeUnix,proto3" json:"start_time_unix,omitempty"` // Unix timestamp in nanoseconds
-	EndTimeUnix   int64                  `protobuf:"varint,3,opt,name=end_time_unix,json=endTimeUnix,proto3" json:"end_time_unix,omitempty"`       // Unix timestamp in nanoseconds (0 if not ended)
-	Pid           int32                  `protobuf:"varint,4,opt,name=pid,proto3" json:"pid,omitempty"`
-	BinaryPath    string                 `protobuf:"bytes,5,opt,name=binary_path,json=binaryPath,proto3" json:"binary_path,omitempty"`
-	EventCount    int64                  `protobuf:"varint,6,opt,name=event_count,json=eventCount,proto3" json:"event_count,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Unix timestamp in nanoseconds
+	StartTimeUnix int64 `protobuf:"varint,2,opt,name=start_time_unix,json=startTimeUnix,proto3" json:"start_time_unix,omitempty"`
+	// Unix timestamp in nanoseconds (0 if not ended)
+	EndTimeUnix   int64  `protobuf:"varint,3,opt,name=end_time_unix,json=endTimeUnix,proto3" json:"end_time_unix,omitempty"`
+	Pid           int32  `protobuf:"varint,4,opt,name=pid,proto3" json:"pid,omitempty"`
+	BinaryPath    string `protobuf:"bytes,5,opt,name=binary_path,json=binaryPath,proto3" json:"binary_path,omitempty"`
+	EventCount    int64  `protobuf:"varint,6,opt,name=event_count,json=eventCount,proto3" json:"event_count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -232,7 +235,7 @@ func (x *PBSession) GetEventCount() int64 {
 type PBStorageFile struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Session       *PBSession             `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
-	Events        []*PBEvent             `protobuf:"bytes,2,rep,name=events,proto3" json:"events,omitempty"`
+	Events        []*RuntimeEvent        `protobuf:"bytes,2,rep,name=events,proto3" json:"events,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -274,7 +277,7 @@ func (x *PBStorageFile) GetSession() *PBSession {
 	return nil
 }
 
-func (x *PBStorageFile) GetEvents() []*PBEvent {
+func (x *PBStorageFile) GetEvents() []*RuntimeEvent {
 	if x != nil {
 		return x.Events
 	}
@@ -285,8 +288,8 @@ var File_cmd_xgotop_storage_event_proto protoreflect.FileDescriptor
 
 const file_cmd_xgotop_storage_event_proto_rawDesc = "" +
 	"\n" +
-	"\x1ecmd/xgotop/storage/event.proto\x12\astorage\"\xaf\x01\n" +
-	"\aPBEvent\x12\x1c\n" +
+	"\x1ecmd/xgotop/storage/event.proto\x12\astorage\"\xb4\x01\n" +
+	"\fRuntimeEvent\x12\x1c\n" +
 	"\ttimestamp\x18\x01 \x01(\x04R\ttimestamp\x12\x1d\n" +
 	"\n" +
 	"event_type\x18\x02 \x01(\x04R\teventType\x12\x1c\n" +
@@ -294,9 +297,9 @@ const file_cmd_xgotop_storage_event_proto_rawDesc = "" +
 	"\x10parent_goroutine\x18\x04 \x01(\rR\x0fparentGoroutine\x12\x1e\n" +
 	"\n" +
 	"attributes\x18\x05 \x03(\x04R\n" +
-	"attributes\"8\n" +
-	"\fPBEventBatch\x12(\n" +
-	"\x06events\x18\x01 \x03(\v2\x10.storage.PBEventR\x06events\"\xbb\x01\n" +
+	"attributes\"B\n" +
+	"\x11RuntimeEventBatch\x12-\n" +
+	"\x06events\x18\x01 \x03(\v2\x15.storage.RuntimeEventR\x06events\"\xbb\x01\n" +
 	"\tPBSession\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12&\n" +
 	"\x0fstart_time_unix\x18\x02 \x01(\x03R\rstartTimeUnix\x12\"\n" +
@@ -305,10 +308,10 @@ const file_cmd_xgotop_storage_event_proto_rawDesc = "" +
 	"\vbinary_path\x18\x05 \x01(\tR\n" +
 	"binaryPath\x12\x1f\n" +
 	"\vevent_count\x18\x06 \x01(\x03R\n" +
-	"eventCount\"g\n" +
+	"eventCount\"l\n" +
 	"\rPBStorageFile\x12,\n" +
-	"\asession\x18\x01 \x01(\v2\x12.storage.PBSessionR\asession\x12(\n" +
-	"\x06events\x18\x02 \x03(\v2\x10.storage.PBEventR\x06eventsB'Z%go.sazak.io/xgotop/cmd/xgotop/storageb\x06proto3"
+	"\asession\x18\x01 \x01(\v2\x12.storage.PBSessionR\asession\x12-\n" +
+	"\x06events\x18\x02 \x03(\v2\x15.storage.RuntimeEventR\x06eventsB'Z%go.sazak.io/xgotop/cmd/xgotop/storageb\x06proto3"
 
 var (
 	file_cmd_xgotop_storage_event_proto_rawDescOnce sync.Once
@@ -324,15 +327,15 @@ func file_cmd_xgotop_storage_event_proto_rawDescGZIP() []byte {
 
 var file_cmd_xgotop_storage_event_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_cmd_xgotop_storage_event_proto_goTypes = []any{
-	(*PBEvent)(nil),       // 0: storage.PBEvent
-	(*PBEventBatch)(nil),  // 1: storage.PBEventBatch
-	(*PBSession)(nil),     // 2: storage.PBSession
-	(*PBStorageFile)(nil), // 3: storage.PBStorageFile
+	(*RuntimeEvent)(nil),      // 0: storage.RuntimeEvent
+	(*RuntimeEventBatch)(nil), // 1: storage.RuntimeEventBatch
+	(*PBSession)(nil),         // 2: storage.PBSession
+	(*PBStorageFile)(nil),     // 3: storage.PBStorageFile
 }
 var file_cmd_xgotop_storage_event_proto_depIdxs = []int32{
-	0, // 0: storage.PBEventBatch.events:type_name -> storage.PBEvent
+	0, // 0: storage.RuntimeEventBatch.events:type_name -> storage.RuntimeEvent
 	2, // 1: storage.PBStorageFile.session:type_name -> storage.PBSession
-	0, // 2: storage.PBStorageFile.events:type_name -> storage.PBEvent
+	0, // 2: storage.PBStorageFile.events:type_name -> storage.RuntimeEvent
 	3, // [3:3] is the sub-list for method output_type
 	3, // [3:3] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name

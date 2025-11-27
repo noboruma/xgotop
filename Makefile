@@ -1,8 +1,19 @@
-all: gen compile run
-.PHONY: all 
+all: proto gen compile run
+.PHONY: all
+
+install-protoc:
+	@if [ "$$(uname)" = "Darwin" ]; then \
+		brew install protobuf || echo "Failed to install protobuf using Homebrew."; \
+	elif [ "$$(uname)" = "Linux" ]; then \
+		sudo apt-get install -y protobuf-compiler || echo "Failed to install protobuf using apt-get."; \
+	fi
+	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 
 vmlinux:
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
+
+proto:
+	protoc --go_out=. --go_opt=paths=source_relative cmd/xgotop/storage/event.proto
 
 gen: vmlinux
 	go generate
@@ -39,6 +50,18 @@ web-build: web-install
 run-web: compile
 	sudo ./xgotop -b ./testserver -rw 8 -pw 1 -batch-size 100 -web -web-port 8080 -storage-format protobuf -storage-dir ./sessions
 
+testserver: compile
+	./testserver
+
+testserver-client:
+	while true; do curl http://localhost/books/test-book/page/100 > /dev/null 2>&1; done
+
+testserver-client-slow:
+	while true; do curl http://localhost/books/test-book/page/100 > /dev/null 2>&1; sleep 1; done
+
+testserver-client-fast:
+	while true; do curl http://localhost/books/test-book/page/100 > /dev/null 2>&1 & done
+
 clean:
 	- rm ebpf_arm64*.go
 	- rm ebpf_arm64*.o
@@ -47,3 +70,4 @@ clean:
 	- rm xgotop
 	- rm -rf web/dist
 	- rm -rf sessions
+	- rm cmd/xgotop/storage/event.pb.go
