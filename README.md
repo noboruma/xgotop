@@ -31,8 +31,8 @@ make compile
 make web-dev
 
 # Run xgotop with the binary path or the PID of a running program
-sudo ./xgotop -b <GO_BINARY_PATH> -web -web-port 8080
-sudo ./xgotop -pid <PROCESS_ID> -web -web-port 8080
+sudo ./xgotop -b <GO_BINARY_PATH> -web
+sudo ./xgotop -pid <PROCESS_ID> -web
 ```
 
 Then open [localhost:5173](http://localhost:5173), and you will see this screen:
