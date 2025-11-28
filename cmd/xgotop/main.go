@@ -36,7 +36,7 @@ var (
 	// Web mode flags
 	webMode       = flag.Bool("web", false, "Enable web mode with API server and WebSocket")
 	webPort       = flag.Int("web-port", 8080, "Port for web API server")
-	storageFormat = flag.String("storage-format", "jsonl", "Storage format: jsonl or protobuf")
+	storageFormat = flag.String("storage-format", "protobuf", "Storage format: protobuf or jsonl")
 	storageDir    = flag.String("storage-dir", "./sessions", "Directory for storing session data")
 
 	silent                = flag.Bool("s", false, "Enable silent mode")
