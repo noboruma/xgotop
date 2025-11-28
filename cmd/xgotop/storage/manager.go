@@ -9,13 +9,11 @@ import (
 	"sync"
 )
 
-// Manager manages multiple storage sessions
 type Manager struct {
 	baseDir string
 	mu      sync.RWMutex
 }
 
-// NewManager creates a new storage manager
 func NewManager(baseDir string) (*Manager, error) {
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("create base directory: %w", err)
@@ -26,7 +24,6 @@ func NewManager(baseDir string) (*Manager, error) {
 	}, nil
 }
 
-// ListSessions returns all sessions
 func (m *Manager) ListSessions(ctx context.Context) ([]*Session, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -45,7 +42,6 @@ func (m *Manager) ListSessions(ctx context.Context) ([]*Session, error) {
 		sessionDir := filepath.Join(m.baseDir, entry.Name())
 		session, err := loadSessionMetadata(sessionDir)
 		if err != nil {
-			// Skip invalid sessions
 			continue
 		}
 
@@ -55,7 +51,6 @@ func (m *Manager) ListSessions(ctx context.Context) ([]*Session, error) {
 	return sessions, nil
 }
 
-// GetSession returns a specific session
 func (m *Manager) GetSession(ctx context.Context, id string) (*Session, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -64,14 +59,12 @@ func (m *Manager) GetSession(ctx context.Context, id string) (*Session, error) {
 	return loadSessionMetadata(sessionDir)
 }
 
-// OpenSession opens a session for reading
 func (m *Manager) OpenSession(ctx context.Context, id string) (EventStore, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	sessionDir := filepath.Join(m.baseDir, id)
 
-	// Detect format based on files present
 	if _, err := os.Stat(filepath.Join(sessionDir, "events.pb")); err == nil {
 		return OpenProtobufStore(m.baseDir, id)
 	}
@@ -82,12 +75,10 @@ func (m *Manager) OpenSession(ctx context.Context, id string) (EventStore, error
 	return nil, fmt.Errorf("no event store found for session %s", id)
 }
 
-// CreateSession creates a new session
 func (m *Manager) CreateSession(ctx context.Context, session *Session, format string) (EventStore, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Save metadata first
 	sessionDir := filepath.Join(m.baseDir, session.ID)
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
 		return nil, fmt.Errorf("create session directory: %w", err)
@@ -97,7 +88,6 @@ func (m *Manager) CreateSession(ctx context.Context, session *Session, format st
 		return nil, fmt.Errorf("save session metadata: %w", err)
 	}
 
-	// Create store based on format
 	format = strings.ToLower(format)
 	switch format {
 	case "jsonl", "json":
@@ -109,7 +99,6 @@ func (m *Manager) CreateSession(ctx context.Context, session *Session, format st
 	}
 }
 
-// DeleteSession deletes a session
 func (m *Manager) DeleteSession(ctx context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -118,7 +107,6 @@ func (m *Manager) DeleteSession(ctx context.Context, id string) error {
 	return os.RemoveAll(sessionDir)
 }
 
-// Close closes the manager
 func (m *Manager) Close() error {
 	return nil
 }

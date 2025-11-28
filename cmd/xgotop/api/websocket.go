@@ -10,16 +10,9 @@ import (
 )
 
 const (
-	// Time allowed to write a message to the peer
-	writeWait = 10 * time.Second
-
-	// Time allowed to read the next pong message from the peer
-	pongWait = 60 * time.Second
-
-	// Send pings to peer with this period (must be less than pongWait)
-	pingPeriod = (pongWait * 9) / 10
-
-	// Maximum message size allowed from peer
+	writeWait      = 10 * time.Second
+	pongWait       = 60 * time.Second
+	pingPeriod     = (pongWait * 9) / 10
 	maxMessageSize = 512
 )
 
@@ -27,35 +20,24 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins in development
+		return true
 	},
 }
 
-// Client is a middleman between the websocket connection and the hub
 type Client struct {
 	hub  *Hub
 	conn *websocket.Conn
 	send chan []byte
 }
 
-// Hub maintains the set of active clients and broadcasts messages to them
 type Hub struct {
-	// Registered clients
-	clients map[*Client]bool
-
-	// Inbound messages from clients
-	broadcast chan []byte
-
-	// Register requests from clients
-	register chan *Client
-
-	// Unregister requests from clients
+	clients    map[*Client]bool
+	broadcast  chan []byte
+	register   chan *Client
 	unregister chan *Client
-
-	mu sync.RWMutex
+	mu         sync.RWMutex
 }
 
-// NewHub creates a new Hub
 func NewHub() *Hub {
 	return &Hub{
 		broadcast:  make(chan []byte, 256),
@@ -65,7 +47,6 @@ func NewHub() *Hub {
 	}
 }
 
-// Run starts the hub
 func (h *Hub) Run() {
 	for {
 		select {
@@ -90,7 +71,6 @@ func (h *Hub) Run() {
 				select {
 				case client.send <- message:
 				default:
-					// Client is slow, close it
 					h.mu.RUnlock()
 					h.mu.Lock()
 					delete(h.clients, client)
@@ -104,12 +84,10 @@ func (h *Hub) Run() {
 	}
 }
 
-// Broadcast sends a message to all connected clients
 func (h *Hub) Broadcast(message []byte) {
 	h.broadcast <- message
 }
 
-// readPump pumps messages from the websocket connection to the hub
 func (c *Client) readPump() {
 	defer func() {
 		c.hub.unregister <- c
@@ -131,11 +109,9 @@ func (c *Client) readPump() {
 			}
 			break
 		}
-		// We don't process messages from clients for now
 	}
 }
 
-// writePump pumps messages from the hub to the websocket connection
 func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
@@ -148,7 +124,6 @@ func (c *Client) writePump() {
 		case message, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				// The hub closed the channel
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
@@ -159,7 +134,6 @@ func (c *Client) writePump() {
 			}
 			w.Write(message)
 
-			// Add queued messages to the current websocket message
 			n := len(c.send)
 			for i := 0; i < n; i++ {
 				w.Write([]byte{'\n'})
@@ -179,7 +153,6 @@ func (c *Client) writePump() {
 	}
 }
 
-// ServeWs handles websocket requests from the peer
 func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -195,7 +168,6 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 
 	client.hub.register <- client
 
-	// Start goroutines
 	go client.writePump()
 	go client.readPump()
 }

@@ -10,7 +10,6 @@ import (
 	"sync"
 )
 
-// JSONLStore implements EventStore using JSON Lines format
 type JSONLStore struct {
 	file       *os.File
 	writer     *bufio.Writer
@@ -20,7 +19,6 @@ type JSONLStore struct {
 	baseDir    string
 }
 
-// NewJSONLStore creates a new JSONL event store
 func NewJSONLStore(baseDir string, session *Session) (*JSONLStore, error) {
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("create base directory: %w", err)
@@ -47,7 +45,6 @@ func NewJSONLStore(baseDir string, session *Session) (*JSONLStore, error) {
 	return store, nil
 }
 
-// OpenJSONLStore opens an existing JSONL store for reading
 func OpenJSONLStore(baseDir string, sessionID string) (*JSONLStore, error) {
 	sessionDir := filepath.Join(baseDir, sessionID)
 	filePath := filepath.Join(sessionDir, "events.jsonl")
@@ -62,7 +59,6 @@ func OpenJSONLStore(baseDir string, sessionID string) (*JSONLStore, error) {
 		baseDir: baseDir,
 	}
 
-	// Load session metadata
 	session, err := loadSessionMetadata(sessionDir)
 	if err != nil {
 		file.Close()
@@ -89,9 +85,6 @@ func (s *JSONLStore) WriteEvent(event *Event) error {
 	if err := s.writer.WriteByte('\n'); err != nil {
 		return fmt.Errorf("write newline: %w", err)
 	}
-
-	// NOTE: Removed per-event flush for performance - use WriteBatch for better performance
-	// Flush will happen on WriteBatch, Close, or when buffer is full
 
 	s.eventCount++
 	return nil

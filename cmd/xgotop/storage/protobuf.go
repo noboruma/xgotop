@@ -13,7 +13,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// ProtobufStore implements EventStore using Protocol Buffers
 type ProtobufStore struct {
 	baseDir    string
 	sessionID  string
@@ -24,19 +23,16 @@ type ProtobufStore struct {
 	mu         sync.RWMutex
 }
 
-// NewProtobufStore creates a new protobuf-based event store
 func NewProtobufStore(baseDir string, session *Session) (EventStore, error) {
 	sessionDir := filepath.Join(baseDir, session.ID)
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
 		return nil, fmt.Errorf("create session directory: %w", err)
 	}
 
-	// Save session metadata
 	if err := saveSessionMetadata(sessionDir, session); err != nil {
 		return nil, fmt.Errorf("save session metadata: %w", err)
 	}
 
-	// Create events file
 	eventsPath := filepath.Join(sessionDir, "events.pb")
 	file, err := os.OpenFile(eventsPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
@@ -47,31 +43,27 @@ func NewProtobufStore(baseDir string, session *Session) (EventStore, error) {
 		baseDir:   baseDir,
 		sessionID: session.ID,
 		file:      file,
-		writer:    bufio.NewWriterSize(file, 64*1024), // 64KB buffer
+		writer:    bufio.NewWriterSize(file, 64*1024),
 		session:   session,
 	}
 
 	return store, nil
 }
 
-// OpenProtobufStore opens an existing protobuf store for reading
 func OpenProtobufStore(baseDir, sessionID string) (EventStore, error) {
 	sessionDir := filepath.Join(baseDir, sessionID)
 
-	// Load session metadata
 	session, err := loadSessionMetadata(sessionDir)
 	if err != nil {
 		return nil, fmt.Errorf("load session metadata: %w", err)
 	}
 
-	// Open events file
 	eventsPath := filepath.Join(sessionDir, "events.pb")
 	file, err := os.OpenFile(eventsPath, os.O_RDWR|os.O_APPEND, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("open events file: %w", err)
 	}
 
-	// Count existing events
 	eventCount, err := countProtobufEvents(eventsPath)
 	if err != nil {
 		file.Close()
@@ -90,12 +82,10 @@ func OpenProtobufStore(baseDir, sessionID string) (EventStore, error) {
 	return store, nil
 }
 
-// WriteEvent writes a single event to storage (not recommended, use WriteBatch)
 func (s *ProtobufStore) WriteEvent(event *Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Convert to protobuf event
 	pbEvent := &RuntimeEvent{
 		Timestamp:       event.Timestamp,
 		EventType:       uint64(event.EventType),
@@ -104,20 +94,17 @@ func (s *ProtobufStore) WriteEvent(event *Event) error {
 		Attributes:      event.Attributes[:],
 	}
 
-	// Marshal the event
 	data, err := proto.Marshal(pbEvent)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
 	}
 
-	// Write length prefix (for framing)
 	lengthBuf := make([]byte, 4)
 	binary.LittleEndian.PutUint32(lengthBuf, uint32(len(data)))
 	if _, err := s.writer.Write(lengthBuf); err != nil {
 		return fmt.Errorf("write length: %w", err)
 	}
 
-	// Write the event data
 	if _, err := s.writer.Write(data); err != nil {
 		return fmt.Errorf("write event: %w", err)
 	}
@@ -126,12 +113,10 @@ func (s *ProtobufStore) WriteEvent(event *Event) error {
 	return nil
 }
 
-// WriteBatch writes multiple events efficiently
 func (s *ProtobufStore) WriteBatch(events []*Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Create a batch message
 	batch := &RuntimeEventBatch{
 		Events: make([]*RuntimeEvent, len(events)),
 	}
@@ -146,32 +131,27 @@ func (s *ProtobufStore) WriteBatch(events []*Event) error {
 		}
 	}
 
-	// Marshal the batch
 	data, err := proto.Marshal(batch)
 	if err != nil {
 		return fmt.Errorf("marshal batch: %w", err)
 	}
 
-	// Write batch marker (0xFFFFFFFF) to indicate batch
 	batchMarker := make([]byte, 4)
 	binary.LittleEndian.PutUint32(batchMarker, 0xFFFFFFFF)
 	if _, err := s.writer.Write(batchMarker); err != nil {
 		return fmt.Errorf("write batch marker: %w", err)
 	}
 
-	// Write batch length
 	lengthBuf := make([]byte, 4)
 	binary.LittleEndian.PutUint32(lengthBuf, uint32(len(data)))
 	if _, err := s.writer.Write(lengthBuf); err != nil {
 		return fmt.Errorf("write batch length: %w", err)
 	}
 
-	// Write the batch data
 	if _, err := s.writer.Write(data); err != nil {
 		return fmt.Errorf("write batch: %w", err)
 	}
 
-	// Flush the buffer
 	if err := s.writer.Flush(); err != nil {
 		return fmt.Errorf("flush writer: %w", err)
 	}
@@ -180,12 +160,10 @@ func (s *ProtobufStore) WriteBatch(events []*Event) error {
 	return nil
 }
 
-// ReadEvents reads events with optional filters
 func (s *ProtobufStore) ReadEvents(ctx context.Context, filter *EventFilter) ([]*Event, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Create a new reader for the file
 	file, err := os.Open(filepath.Join(s.baseDir, s.sessionID, "events.pb"))
 	if err != nil {
 		return nil, fmt.Errorf("open file for reading: %w", err)
@@ -203,7 +181,6 @@ func (s *ProtobufStore) ReadEvents(ctx context.Context, filter *EventFilter) ([]
 		default:
 		}
 
-		// Read length prefix
 		lengthBuf := make([]byte, 4)
 		if _, err := io.ReadFull(reader, lengthBuf); err != nil {
 			if err == io.EOF {
@@ -222,19 +199,16 @@ func (s *ProtobufStore) ReadEvents(ctx context.Context, filter *EventFilter) ([]
 			}
 			length = binary.LittleEndian.Uint32(lengthBuf)
 
-			// Read batch data
 			data := make([]byte, length)
 			if _, err := io.ReadFull(reader, data); err != nil {
 				return nil, fmt.Errorf("read batch data: %w", err)
 			}
 
-			// Unmarshal batch
 			batch := &RuntimeEventBatch{}
 			if err := proto.Unmarshal(data, batch); err != nil {
 				return nil, fmt.Errorf("unmarshal batch: %w", err)
 			}
 
-			// Process batch events
 			for _, pbEvent := range batch.Events {
 				if shouldIncludeEvent(pbEvent, filter, offset, len(events)) {
 					events = append(events, convertFromProto(pbEvent))
@@ -245,13 +219,11 @@ func (s *ProtobufStore) ReadEvents(ctx context.Context, filter *EventFilter) ([]
 				}
 			}
 		} else {
-			// Single event
 			data := make([]byte, length)
 			if _, err := io.ReadFull(reader, data); err != nil {
 				return nil, fmt.Errorf("read event data: %w", err)
 			}
 
-			// Unmarshal event
 			pbEvent := &RuntimeEvent{}
 			if err := proto.Unmarshal(data, pbEvent); err != nil {
 				return nil, fmt.Errorf("unmarshal event: %w", err)
@@ -271,7 +243,6 @@ func (s *ProtobufStore) ReadEvents(ctx context.Context, filter *EventFilter) ([]
 	return events, nil
 }
 
-// GetGoroutines returns unique goroutine IDs
 func (s *ProtobufStore) GetGoroutines(ctx context.Context) ([]uint32, error) {
 	events, err := s.ReadEvents(ctx, nil)
 	if err != nil {
@@ -291,7 +262,6 @@ func (s *ProtobufStore) GetGoroutines(ctx context.Context) ([]uint32, error) {
 	return goroutines, nil
 }
 
-// Close closes the storage
 func (s *ProtobufStore) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -311,18 +281,15 @@ func (s *ProtobufStore) Close() error {
 	return nil
 }
 
-// GetSession returns session metadata
 func (s *ProtobufStore) GetSession() *Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Create a copy to avoid race conditions
 	sessionCopy := *s.session
 	sessionCopy.EventCount = s.eventCount
 	return &sessionCopy
 }
 
-// UpdateSession updates session metadata
 func (s *ProtobufStore) UpdateSession(session *Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -331,8 +298,6 @@ func (s *ProtobufStore) UpdateSession(session *Session) error {
 	sessionDir := filepath.Join(s.baseDir, s.sessionID)
 	return saveSessionMetadata(sessionDir, session)
 }
-
-// Helper functions
 
 func countProtobufEvents(path string) (int64, error) {
 	file, err := os.Open(path)
@@ -348,7 +313,6 @@ func countProtobufEvents(path string) (int64, error) {
 	count := int64(0)
 
 	for {
-		// Read length prefix
 		lengthBuf := make([]byte, 4)
 		if _, err := io.ReadFull(reader, lengthBuf); err != nil {
 			if err == io.EOF {
@@ -367,7 +331,6 @@ func countProtobufEvents(path string) (int64, error) {
 			}
 			length = binary.LittleEndian.Uint32(lengthBuf)
 
-			// Read and unmarshal batch to count events
 			data := make([]byte, length)
 			if _, err := io.ReadFull(reader, data); err != nil {
 				return 0, fmt.Errorf("read batch data: %w", err)
@@ -380,7 +343,6 @@ func countProtobufEvents(path string) (int64, error) {
 
 			count += int64(len(batch.Events))
 		} else {
-			// Single event - skip the data
 			if _, err := reader.Discard(int(length)); err != nil {
 				return 0, fmt.Errorf("skip event data: %w", err)
 			}
@@ -396,12 +358,10 @@ func shouldIncludeEvent(pbEvent *RuntimeEvent, filter *EventFilter, offset int, 
 		return true
 	}
 
-	// Check offset
 	if filter.Offset > 0 && offset < filter.Offset {
 		return false
 	}
 
-	// Check filters
 	if filter.Goroutine != nil && pbEvent.Goroutine != *filter.Goroutine {
 		return false
 	}
@@ -429,7 +389,6 @@ func convertFromProto(pbEvent *RuntimeEvent) *Event {
 		ParentGoroutine: pbEvent.ParentGoroutine,
 	}
 
-	// Copy attributes
 	copy(event.Attributes[:], pbEvent.Attributes)
 
 	return event
