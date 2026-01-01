@@ -2,10 +2,7 @@
 
 // func casgstatus(gp *g, oldval, newval uint32)
 SEC("uprobe/runtime.casgstatus")
-int BPF_KPROBE(uprobe_casgstatus,
-               const void *gp,
-               const u32 oldval,
-               const u32 newval) {
+int BPF_KPROBE(uprobe_casgstatus, const void *gp, const u32 oldval, const u32 newval) {
     u64 probe_start_ns = bpf_ktime_get_ns();
     u64 _ret, gp_id, g_id, g_parent_id;
     struct go_runtime_g g;
@@ -22,7 +19,7 @@ int BPF_KPROBE(uprobe_casgstatus,
     bpf_printk("casgstatus: goid=%llu, oldval=%u, newval=%u", g.goid, oldval, newval);
 #endif
 
-    _ret = get_go_g_struct_arm(ctx, &g);
+    _ret = get_go_g_struct(ctx, &g);
     if (_ret < 0) {
         bpf_printk("Failed to read g, ret=%d", _ret);
         return 0;
@@ -35,10 +32,12 @@ int BPF_KPROBE(uprobe_casgstatus,
         u64 *ts = bpf_map_lookup_elem(&goroutines_in_exit, &gp_id);
         if (ts != NULL) {
             // Still send the event for the CAS_G_STATUS
-            SEND_EVENT_WITH_SAMPLING(GO_RUNTIME_EVENT_TYPE_CAS_G_STATUS, g_id, g_parent_id, oldval, newval, gp_id, 0, 0, probe_start_ns);
-            
+            SEND_EVENT_WITH_SAMPLING(GO_RUNTIME_EVENT_TYPE_CAS_G_STATUS, g_id, g_parent_id, oldval,
+                                     newval, gp_id, 0, 0, probe_start_ns);
+
             // Notify the userspace program that the goroutine has exited
-            SEND_EVENT_WITH_SAMPLING(GO_RUNTIME_EVENT_TYPE_GOEXIT, g_id, g_parent_id, gp_id, *ts, 0, 0, 0, probe_start_ns);
+            SEND_EVENT_WITH_SAMPLING(GO_RUNTIME_EVENT_TYPE_GOEXIT, g_id, g_parent_id, gp_id, *ts, 0,
+                                     0, 0, probe_start_ns);
             _ret = bpf_map_delete_elem(&goroutines_in_exit, &g_id);
             if (_ret < 0) {
                 bpf_printk("Failed to delete goroutines_in_exit, ret=%d", _ret);
@@ -52,9 +51,10 @@ int BPF_KPROBE(uprobe_casgstatus,
 
     u64 *callerg_id = bpf_map_lookup_elem(&goroutines_in_creation, &g_id);
     if (callerg_id != NULL) {
-        // This function is called inside the newproc1 function, so we need to send an event for the caller.
-        // We cannot use a uretprobe on newproc1 so we're using this trick!
-        SEND_EVENT_WITH_SAMPLING(GO_RUNTIME_EVENT_TYPE_NEWGOROUTINE, g_id, g_parent_id, *callerg_id, gp_id, 0, 0, 0, probe_start_ns);
+        // This function is called inside the newproc1 function, so we need to send an event for the
+        // caller. We cannot use a uretprobe on newproc1 so we're using this trick!
+        SEND_EVENT_WITH_SAMPLING(GO_RUNTIME_EVENT_TYPE_NEWGOROUTINE, g_id, g_parent_id, *callerg_id,
+                                 gp_id, 0, 0, 0, probe_start_ns);
         _ret = bpf_map_delete_elem(&goroutines_in_creation, &g_id);
         if (_ret < 0) {
             bpf_printk("Failed to delete goroutines_in_creation, ret=%d", _ret);
@@ -62,7 +62,8 @@ int BPF_KPROBE(uprobe_casgstatus,
         }
     }
 
-    SEND_EVENT_WITH_SAMPLING(GO_RUNTIME_EVENT_TYPE_CAS_G_STATUS, g_id, g_parent_id, oldval, newval, gp_id, 0, 0, probe_start_ns);
+    SEND_EVENT_WITH_SAMPLING(GO_RUNTIME_EVENT_TYPE_CAS_G_STATUS, g_id, g_parent_id, oldval, newval,
+                             gp_id, 0, 0, probe_start_ns);
     return 0;
 }
 
@@ -71,13 +72,12 @@ int BPF_KPROBE(uprobe_casgstatus,
 // }
 // _type is abi.Type
 SEC("uprobe/runtime.newobject")
-int BPF_KPROBE(uprobe_newobject,
-               const void *typ) {
+int BPF_KPROBE(uprobe_newobject, const void *typ) {
     u64 probe_start_ns = bpf_ktime_get_ns();
     u64 _ret;
     struct go_runtime_g g;
 
-    _ret = get_go_g_struct_arm(ctx, &g);
+    _ret = get_go_g_struct(ctx, &g);
     if (_ret < 0) {
         bpf_printk("Failed to read g, ret=%d", _ret);
         return 0;
@@ -97,21 +97,19 @@ int BPF_KPROBE(uprobe_newobject,
     bpf_printk("newobject: size=%llu, kind=%llu", go_type.size, go_type.kind);
 #endif
 
-    SEND_EVENT_WITH_SAMPLING(GO_RUNTIME_EVENT_TYPE_NEW_OBJECT, g.goid, g.parentGoid, go_type.size, go_type.kind, 0, 0, 0, probe_start_ns);
+    SEND_EVENT_WITH_SAMPLING(GO_RUNTIME_EVENT_TYPE_NEW_OBJECT, g.goid, g.parentGoid, go_type.size,
+                             go_type.kind, 0, 0, 0, probe_start_ns);
     return 0;
 }
 
-// func makeslice(et *_type, len, cap int) unsafe.Pointer 
+// func makeslice(et *_type, len, cap int) unsafe.Pointer
 SEC("uprobe/runtime.makeslice")
-int BPF_KPROBE(uprobe_makeslice,
-               const void *typ,
-               const u64 len,
-               const u64 cap) {
+int BPF_KPROBE(uprobe_makeslice, const void *typ, const u64 len, const u64 cap) {
     u64 probe_start_ns = bpf_ktime_get_ns();
     u64 _ret;
 
     struct go_runtime_g g;
-    _ret = get_go_g_struct_arm(ctx, &g);
+    _ret = get_go_g_struct(ctx, &g);
     if (_ret < 0) {
         bpf_printk("Failed to read g, ret=%d", _ret);
         return 0;
@@ -133,21 +131,19 @@ int BPF_KPROBE(uprobe_makeslice,
     bpf_printk("makeslice: len=%llu, cap=%llu", len, cap);
 #endif
 
-    SEND_EVENT_WITH_SAMPLING(GO_RUNTIME_EVENT_TYPE_MAKE_SLICE, g.goid, g.parentGoid, go_type.size, go_type.kind, len, cap, 0, probe_start_ns);
+    SEND_EVENT_WITH_SAMPLING(GO_RUNTIME_EVENT_TYPE_MAKE_SLICE, g.goid, g.parentGoid, go_type.size,
+                             go_type.kind, len, cap, 0, probe_start_ns);
     return 0;
 }
 
 // func makemap(t *abi.MapType, hint int, m *maps.Map) *maps.Map
 SEC("uprobe/runtime.makemap")
-int BPF_KPROBE(uprobe_makemap,
-               const void *typ,
-               const u64 hint,
-               const void *m) {
+int BPF_KPROBE(uprobe_makemap, const void *typ, const u64 hint, const void *m) {
     u64 probe_start_ns = bpf_ktime_get_ns();
     u64 _ret;
 
     struct go_runtime_g g;
-    _ret = get_go_g_struct_arm(ctx, &g);
+    _ret = get_go_g_struct(ctx, &g);
     if (_ret < 0) {
         bpf_printk("Failed to read g, ret=%d", _ret);
         return 0;
@@ -162,34 +158,34 @@ int BPF_KPROBE(uprobe_makemap,
         bpf_printk("Failed to read go_map, ret=%d, go_map=%p", _ret, go_map);
         return 0;
     }
-    
+
     struct go_abi_type key_type, elem_type;
-    _ret = bpf_probe_read(&key_type, sizeof(key_type), (void*)go_map.key_ptr);
+    _ret = bpf_probe_read(&key_type, sizeof(key_type), (void *)go_map.key_ptr);
     if (_ret < 0) {
         bpf_printk("Failed to read key_type, ret=%d, key_type=%p", _ret, key_type);
         return 0;
     }
-    
-    _ret = bpf_probe_read(&elem_type, sizeof(elem_type), (void*)go_map.elem_ptr);
+
+    _ret = bpf_probe_read(&elem_type, sizeof(elem_type), (void *)go_map.elem_ptr);
     if (_ret < 0) {
         bpf_printk("Failed to read elem_type, ret=%d, elem_type=%p", _ret, elem_type);
         return 0;
     }
-    
+
 #ifdef BPF_DEBUG
     bpf_printk("makemap: key size=%llu, key kind=%llu", key_type.size, key_type.kind);
-    bpf_printk("makemap: elem size=%llu, elem kind=%llu, hint=%llu", elem_type.size, elem_type.kind, hint);
+    bpf_printk("makemap: elem size=%llu, elem kind=%llu, hint=%llu", elem_type.size, elem_type.kind,
+               hint);
 #endif
-    
-    SEND_EVENT_WITH_SAMPLING(GO_RUNTIME_EVENT_TYPE_MAKE_MAP, g.goid, g.parentGoid, key_type.size, key_type.kind, elem_type.size, elem_type.kind, hint, probe_start_ns);
+
+    SEND_EVENT_WITH_SAMPLING(GO_RUNTIME_EVENT_TYPE_MAKE_MAP, g.goid, g.parentGoid, key_type.size,
+                             key_type.kind, elem_type.size, elem_type.kind, hint, probe_start_ns);
     return 0;
 }
 
 // func newproc1(fn *funcval, callergp *g, callerpc uintptr, parked bool, waitreason waitReason) *g
 SEC("uprobe/runtime.newproc1")
-int BPF_KPROBE(uprobe_newproc1,
-               const void *__skip_fn,
-               const void *callergp) {
+int BPF_KPROBE(uprobe_newproc1, const void *__skip_fn, const void *callergp) {
     u64 _ret, goid, callergoid;
     struct go_runtime_g g;
 
@@ -200,8 +196,8 @@ int BPF_KPROBE(uprobe_newproc1,
     }
 
     callergoid = g.goid;
-    
-    _ret = get_go_g_struct_arm(ctx, &g);
+
+    _ret = get_go_g_struct(ctx, &g);
     if (_ret < 0) {
         bpf_printk("newproc1: failed to read g, ret=%d", _ret);
         return 0;
@@ -229,7 +225,7 @@ int BPF_KPROBE(uprobe_goexit1) {
     u64 _ret;
 
     struct go_runtime_g g;
-    _ret = get_go_g_struct_arm(ctx, &g);
+    _ret = get_go_g_struct(ctx, &g);
     if (_ret < 0) {
         bpf_printk("goexit1: failed to read g, ret=%d", _ret);
         return 0;

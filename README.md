@@ -16,9 +16,6 @@ Whether you're debugging a production issue, optimizing performance, or just cur
 - **Session replay** to replay past observations
 - **Watch by binary or PID** of the target Go program
 
-> [!NOTE]
-> `xgotop` only supports `arm64` architecture for now, we will rollout support for `amd64` soon!
-
 ## Usage
 
 Running `xgotop` is relatively straightforward. Get a Go binary ready, and run each of the commands below in a separate terminal:
@@ -129,7 +126,7 @@ The sampling feature is one of the most powerful ways to reduce overhead when mo
 You can sample the following event types:
 
 - `newgoroutine`: Goroutine creation
-- `goexit`: Goroutine exit  
+- `goexit`: Goroutine exit
 - `makemap`: Map allocation
 - `makeslice`: Slice allocation
 - `newobject`: Object allocation
